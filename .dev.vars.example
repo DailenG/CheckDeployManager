@@ -1,0 +1,9 @@
+# Copy this file to .dev.vars for local development.
+# .dev.vars is gitignored and must never be committed.
+
+# Setting ENVIRONMENT to development bypasses Cloudflare Access JWT
+# validation for local runs only. Never set this in production.
+ENVIRONMENT=development
+
+# Identity used for audit log entries while the dev bypass is active.
+DEV_OPERATOR_EMAIL=dev@localhost

@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "checkdeploymanager",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "assets": {
+    "directory": "src/ui",
+    "binding": "ASSETS",
+    // The dashboard must pass through the Worker so the Access JWT check
+    // runs before any static asset is served.
+    "run_worker_first": ["/manage", "/manage/*"]
+  },
+  "d1_databases": [
+    {
+      // database_id is intentionally omitted so the Deploy to Cloudflare
+      // button and Wrangler auto-provisioning create and link the database.
+      "binding": "DB",
+      "database_name": "checkdeploymanager-db"
+    }
+  ],
+  "r2_buckets": [
+    { "binding": "STORAGE", "bucket_name": "checkdeploymanager-storage" }
+  ],
+  "triggers": { "crons": ["17 6 * * *"] },
+  "vars": {
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_APP_AUD": "",
+    "ENVIRONMENT": "production"
+  },
+  "observability": { "enabled": true }
+}

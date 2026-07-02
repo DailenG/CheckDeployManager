@@ -1,0 +1,24 @@
+{
+  "name": "checkdeploymanager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multi tenant configuration service for the Check by CyberDrain browser extension, hosted on Cloudflare Workers",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
+    "test": "vitest run",
+    "migrate:local": "wrangler d1 migrations apply DB --local"
+  },
+  "dependencies": {
+    "hono": "^4.12.27"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.17.0",
+    "@cloudflare/workers-types": "^4.20260702.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9",
+    "wrangler": "^4.106.0"
+  }
+}
