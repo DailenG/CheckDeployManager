@@ -48,6 +48,21 @@ curl "http://localhost:8787/__scheduled?cron=17+6+*+*+*"
 1. Click the Deploy to Cloudflare button above. Cloudflare clones the repo into your account, provisions the D1 database and R2 bucket from `wrangler.jsonc`, runs the D1 migrations, and deploys the Worker to `checkdeploymanager.<your-account>.workers.dev`.
 2. Complete the post-deploy runbook below. Steps 1 through 4 are one-time platform setup; 5 through 8 bring the service into operation.
 
+### What the deploy form asks for
+
+The button flow prompts for more than you might expect. Field by field:
+
+- **Git repository.** The flow creates a copy of this repo in your own GitHub or GitLab account and deploys from that copy. Pick the account or org and a repository name. Future pushes to your copy can redeploy the Worker via Workers Builds.
+- **Project name, D1 database, R2 bucket.** Accept the defaults or rename; choose "create new" for both resources unless you are intentionally reusing existing ones.
+- **Build command.** Leave blank. There is no build step; Wrangler bundles the TypeScript and the dashboard is static files.
+- **Deploy command.** Use `npm run deploy`. This applies the D1 migrations before `wrangler deploy`; a plain `wrangler deploy` would leave the database schemaless.
+- **`ENVIRONMENT` (default `production`).** Keep it exactly `production`. The value `development` disables auth and exists only for local `wrangler dev`.
+- **A second `ENVIRONMENT` and `DEV_OPERATOR_EMAIL`.** These are picked up from `.dev.vars.example`, which exists only for local development. Leave them blank or remove them; never set `ENVIRONMENT=development` on a deployed Worker.
+- **`ACCESS_TEAM_DOMAIN`.** The form may require a value. If you already know your Zero Trust team domain, enter it as a bare hostname (`<team>.cloudflareaccess.com`, no `https://`). Otherwise enter any placeholder and correct it in runbook step 3.
+- **`ACCESS_APP_AUD`.** The AUD tag does not exist until you create the Access application in runbook step 2, so enter a placeholder and fill in the real value in runbook step 3.
+
+Placeholder or empty Access values are safe: the Worker fails closed and rejects every `/manage` and `/api` request until both values validate real tokens. The public endpoints (`/rules`, `/preview`, `/assets`, `/hook`) work immediately.
+
 ### Post-deploy runbook
 
 1. **Add the One-time PIN identity provider.** Zero Trust > Settings > Authentication > Add new > One-time PIN. New Zero Trust organizations default to the Cloudflare identity provider only, so this is an explicit step.
