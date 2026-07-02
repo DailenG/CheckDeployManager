@@ -4,6 +4,7 @@ import { requireOperator, type AppEnv } from "./middleware";
 import { rulesRoutes } from "./routes/rules";
 import { hookRoutes } from "./routes/hook";
 import { apiRoutes } from "./routes/api";
+import { runScheduledTasks } from "./lib/cron";
 
 const app = new Hono<AppEnv>();
 
@@ -20,4 +21,15 @@ app.get("/manage/*", (c) => c.env.ASSETS.fetch(c.req.raw));
 
 export default {
   fetch: app.fetch,
+  scheduled: async (controller, env, ctx) => {
+    ctx.waitUntil(
+      (async () => {
+        const { sync, cleanup } = await runScheduledTasks(env);
+        console.log(
+          "cron complete:",
+          JSON.stringify({ sync: sync.status, diff: sync.diffSummary, cleanup }),
+        );
+      })(),
+    );
+  },
 } satisfies ExportedHandler<Env>;
