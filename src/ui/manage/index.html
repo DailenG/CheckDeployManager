@@ -1,10 +1,29 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CheckDeployManager</title>
+  <link rel="stylesheet" href="/manage/styles.css">
 </head>
 <body>
-  <p>CheckDeployManager dashboard placeholder.</p>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">Check</span>DeployManager
+    </div>
+    <nav id="main-nav">
+      <a href="#/tenants" data-nav="tenants">Tenants</a>
+      <a href="#/events" data-nav="events">Inbox</a>
+      <a href="#/upstream" data-nav="upstream">Upstream</a>
+      <a href="#/settings" data-nav="settings">Settings</a>
+      <a href="#/audit" data-nav="audit">Audit</a>
+    </nav>
+    <button id="theme-toggle" class="ghost" title="Toggle light and dark theme">Light</button>
+  </header>
+  <main id="view">
+    <p class="muted">Loading...</p>
+  </main>
+  <div id="toast" class="toast hidden"></div>
+  <script src="/manage/app.js"></script>
 </body>
 </html>
