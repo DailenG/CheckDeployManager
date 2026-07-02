@@ -673,3 +673,14 @@ Licensing: MIT for this repository. AGPL-3.0 obligations do not attach because n
 ---
 
 End of design. Build proceeds on approval via the BUILD HANDOFF PROMPT.
+
+---
+
+## Appendix: Implementation notes (build deviations)
+
+Two concrete conflicts between section 6.2 and platform reality surfaced during the build; both were resolved with the minimal change:
+
+1. **`database_id` is omitted rather than blank.** Wrangler v4 rejects an empty-string `database_id` at `wrangler dev` startup. Omitting the key entirely preserves the intended behavior: the Deploy to Cloudflare button and Wrangler auto-provisioning create and link the database on first deploy.
+2. **`run_worker_first` added for `/manage` paths.** With a static assets binding, asset requests are served before the Worker runs by default, which would have bypassed the in-Worker Access JWT validation on `/manage`. `"run_worker_first": ["/manage", "/manage/*"]` routes those paths through the Worker so the defense-in-depth check from section 4 actually executes; the Worker then serves the asset via the `ASSETS` binding after validation.
+
+One addition: the published version suffix label (`1.2.3+wdc.7` in the examples) is the instance setting `version_suffix_label`, defaulting to `cdm` so a fresh open source install carries no WDC branding. WDC sets it to `wdc` during first-run configuration.
