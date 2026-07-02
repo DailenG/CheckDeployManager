@@ -18,6 +18,19 @@ The Deploy to Cloudflare flow asks for the following. Fields not listed here (pr
 
 Placeholder Access values are safe: management routes fail closed until both values validate real tokens, while the public endpoints serve immediately.
 
+### 0.1 If the first build fails
+
+The button flow can provision the resources and apply migrations but still fail at its deploy step, leaving a placeholder Worker. Symptoms: the Worker URL answers `Hello world`, the overview shows "No URLs enabled", and no bindings are listed. Recovery from a local clone:
+
+1. `npx wrangler login` (choose the target account), then `npx wrangler d1 list` and copy the UUID of `checkdeploymanager-db`.
+2. In `wrangler.jsonc`, temporarily set `database_id` to that UUID and fill in the real `ACCESS_TEAM_DOMAIN` and `ACCESS_APP_AUD` values.
+3. `npx wrangler d1 migrations apply DB --remote` (it may report nothing to apply if the build got that far).
+4. `npx wrangler deploy`. The output should list the DB, STORAGE, and ASSETS bindings, the vars, the cron trigger, and the live URL.
+5. Verify: `curl -i https://<worker-host>/rules/test.json` returns a bare 404 (proves the Worker and D1 are live), and `/manage` redirects to your Access login.
+6. If the Worker URL still does not resolve, enable the Worker URLs toggle under the Worker's Settings > Domains and Routes.
+
+Include the real Access values in step 2 rather than deploying with blanks: `wrangler deploy` treats the config as the source of truth for vars and overwrites anything set in the dashboard. For the same reason, either update the git clone the button created with these values (they are not secrets) or disconnect its build integration; otherwise the next push to the clone rebuilds with placeholders and locks you out of `/manage` until the values are re-entered.
+
 ## 1. Post-deploy setup (one time)
 
 Prerequisite: the Deploy to Cloudflare button (or `npm run deploy` from a clone) has already provisioned the D1 database and R2 bucket, applied migrations, and deployed the Worker to `checkdeploymanager.<account>.workers.dev`.
@@ -30,11 +43,28 @@ New Zero Trust organizations default to the Cloudflare identity provider and do 
 
 ### 1.2 Create the Access application
 
-Zero Trust > Access > Applications > Add an application > Self-hosted.
+Zero Trust > Access controls > Applications > Add an application > Self-hosted.
 
-- Application domain entries: `checkdeploymanager.<account>.workers.dev` with paths `manage*` and `api*`. If you attach a custom hostname later, add the same two paths for it.
-- Policy: Action Allow, Include: Emails ending in `@<your-domain>`.
-- Save, then open the application's overview and record the **Application Audience (AUD) tag**.
+**Destinations.** The hostname picker offers destination types; use **Workers** for the `workers.dev` hostname (it exists because `workers.dev` is not a DNS zone in your account) and **Public DNS** for a custom hostname on one of your zones. Add four entries in this one application:
+
+| Destination type | Hostname | Path |
+|---|---|---|
+| Workers | `checkdeploymanager.<subdomain>.workers.dev` | `manage*` |
+| Workers | `checkdeploymanager.<subdomain>.workers.dev` | `api*` |
+| Public DNS | `<your-custom-hostname>` | `manage*` |
+| Public DNS | `<your-custom-hostname>` | `api*` |
+
+The path field is not optional in practice. Never leave it blank: a blank path puts the whole hostname behind Access, including `/rules`, `/preview`, `/assets`, and `/hook`, and the extension cannot complete an Access login, so every managed browser silently stops fetching rules. The trailing `*` covers the sub-paths. Keeping all hostnames in one application means one AUD tag; adding hostnames later never changes it.
+
+**Login flow caveat.** Access sets its session cookie by bouncing the browser through every destination hostname after login. If any destination hostname is not serving yet (for example the custom domain before section 1.4 is done), logins dead-end on a "site cannot be reached" page for that hostname. Either attach the custom domain to the Worker before your first login, or add its destinations only when it is live.
+
+**Policy.** Policies are standalone objects you attach to the app. Create one: name `Operators`, action **Allow**, include rule: selector **Emails ending in**, value `@<your-domain>`. Session duration default (24 h) is fine. Do not add Bypass or Service Auth policies for these paths.
+
+**Login methods.** Select One-time PIN (or accept all if OTP is your only IdP). If OTP is not offered, section 1.1 was skipped.
+
+**Other settings.** All defaults are fine. App Launcher visibility is a nice-to-have (operators find the dashboard at `https://<team>.cloudflareaccess.com`). Leave CORS settings untouched; the endpoints that need CORS are public and set their own headers.
+
+**Record the AUD tag.** Save the application, then open it again and switch to the **Additional Settings** tab (next to Application Details at the top); the **Application Audience (AUD) Tag** is a 64-character hex string with a copy button. Note that the copyable application JSON on the list screen does not include it, and the `id` UUID in that JSON is not the AUD.
 
 The Access free plan covers up to 50 users.
 
@@ -42,22 +72,31 @@ The Access free plan covers up to 50 users.
 
 Workers and Pages > checkdeploymanager > Settings > Variables and Secrets:
 
-- `ACCESS_TEAM_DOMAIN` = `<your-team>.cloudflareaccess.com`
+- `ACCESS_TEAM_DOMAIN` = `<your-team>.cloudflareaccess.com` (bare hostname, no `https://`)
 - `ACCESS_APP_AUD` = the AUD tag from 1.2
 
-These are identifiers, not secrets. The Worker validates the `cf-access-jwt-assertion` header on every `/manage` and `/api` request: signature against the team JWKS, audience match, and expiry. Until both variables are set, every management request is rejected (fail closed), so complete this step before first use.
+Use type **Text**, not Secret: these are identifiers, not credentials (the AUD appears in every Access JWT), Text keeps them visible for debugging, and a Secret colliding with the same-named config var breaks deploys.
+
+The Worker validates the `cf-access-jwt-assertion` header on every `/manage` and `/api` request: signature against the team JWKS, audience match, and expiry. Until both variables are set, every management request is rejected (fail closed), so complete this step before first use.
+
+Durability caveat: any deploy from a wrangler config (including the git clone's automatic builds) overwrites dashboard-set vars with the config's values. If your deployment repo still carries blank or placeholder values, mirror the real ones into its `wrangler.jsonc` so a future redeploy cannot lock you out.
 
 ### 1.4 Attach the custom domain (recommended)
 
 Workers and Pages > checkdeploymanager > Settings > Domains and Routes > Add > Custom domain.
 
-The hostname you choose is baked into every generated client policy, so treat it as permanent. After attaching, add the same hostname with `manage*` and `api*` paths to the Access application from 1.2.
+Cloudflare creates the DNS record and issues the certificate automatically; the hostname is usually live within a minute or two. The hostname you choose is baked into every generated client policy, so treat it as permanent: keep the zone's registration on auto-renew and reserve the subdomain for this service indefinitely. If you did not already add the hostname's `manage*` and `api*` destinations to the Access application in 1.2, add them now.
+
+Once the custom domain serves, two follow-ups:
+
+1. Set the dashboard's public base URL to the custom hostname (section 2) **before** generating any artifacts, so client policies never carry the `workers.dev` hostname.
+2. Optionally retire the `workers.dev` hostname so the custom domain is the only management surface. Do these two changes together or not at all: remove the `workers.dev` destinations from the Access application **and** disable the Worker URLs toggle under Domains and Routes. An Access destination pointing at a hostname that no longer serves breaks every login (see the login flow caveat in 1.2). Custom domains attached in the dashboard survive `wrangler deploy`, since the repo config ships no routes block.
 
 ## 2. First-run configuration
 
 1. Open `https://<your-hostname>/manage` and authenticate via OTP.
-2. Go to **Settings** and configure:
-   - **Public base URL**: `https://<your-hostname>` (used in every rules URL, hook URL, and artifact)
+2. Go to **Settings** (in the dashboard's own top navigation, not the Cloudflare dashboard) and configure:
+   - **Public base URL**: `https://<your-hostname>` with the scheme and no trailing slash (used in every rules URL, hook URL, and artifact; set it to the permanent custom hostname before generating anything)
    - **Default CIPP server URL**: your CIPP instance, or blank to disable CIPP fields by default
    - **Version suffix label**: short label stamped into published versions (`1.2.3+<label>.<n>`)
    - Retention: metrics days (default 7), webhook days (default 90), stale-fetch hours (default 48), snapshots to keep (default 10)
@@ -111,7 +150,24 @@ After bring-up or a significant change:
 8. Rotation drill: rotate, confirm both GUIDs serve, revoke the old, confirm 404 and the revoked-hit counter increments.
 9. Rollback drill: publish a deliberately noisy rule, roll back one version, and confirm the endpoint ETag reverts.
 
-## 5. Recovery
+## 5. Troubleshooting
+
+Symptoms observed on real deployments, with causes and fixes:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Worker URL answers `Hello world`; no bindings; "No URLs enabled" | The deploy button's build failed after provisioning, leaving the placeholder Worker | Deploy locally per section 0.1 |
+| Worker URL does not resolve at all | Worker URLs toggle disabled | Worker > Settings > Domains and Routes > enable the `workers.dev` Worker URL |
+| Login succeeds but ends on "site cannot be reached" at another hostname | The Access app has a destination for a hostname that is not serving yet (Access bounces through every destination to set cookies) | Attach the custom domain to the Worker (1.4), or remove that hostname's destinations until it is live |
+| `/manage` returns JSON `{"error":"audience mismatch"}` after login | `ACCESS_APP_AUD` does not match the application's AUD tag | Re-copy the AUD from the app's Additional Settings tab |
+| `/manage` returns JSON `{"error":"issuer mismatch"}` after login | `ACCESS_TEAM_DOMAIN` wrong or not a bare hostname | Set it to exactly `<team>.cloudflareaccess.com` |
+| `/manage` returns JSON `{"error":"Access is not configured..."}` | Both Access vars empty, often right after a redeploy overwrote dashboard-set values with config placeholders | Re-enter the values and mirror them into the deploying config (1.3) |
+| `/manage` returns a bare JSON 403 with no Access login page first | The hostname or path is not covered by any Access application destination | Add the missing destination (1.2) |
+| Cannot find the AUD tag | It is not in the copyable application JSON and not on the Application Details tab | App editor > Additional Settings tab; or the Access API (`GET /accounts/{id}/access/apps`, field `aud`) |
+| Extension stops fetching rules after Access changes | A blank destination path put the public endpoints behind Access | Scope destinations to `manage*` and `api*` only |
+| Artifacts carry the `workers.dev` hostname | Public base URL was unset or set to the temporary hostname when they were copied | Set the public base URL (section 2) and re-copy; artifacts always render fresh |
+
+## 6. Recovery
 
 - **Bad tenant publish**: roll back from the Versions tab (pointer move, audited).
 - **Bad upstream snapshot**: failed validation never activates. For a bad-but-valid upstream change, roll back affected tenants; versions record which snapshot they merged against.

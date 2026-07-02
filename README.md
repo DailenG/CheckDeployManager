@@ -63,12 +63,14 @@ The button flow prompts for more than you might expect. Field by field:
 
 Placeholder or empty Access values are safe: the Worker fails closed and rejects every `/manage` and `/api` request until both values validate real tokens. The public endpoints (`/rules`, `/preview`, `/assets`, `/hook`) work immediately.
 
+If the deployed URL answers `Hello world` or shows "No URLs enabled", the button's build failed after provisioning and left a placeholder Worker; recover with one local `wrangler deploy` per the runbook's [section 0.1](docs/runbook.md) and check its troubleshooting table for other first-deploy symptoms.
+
 ### Post-deploy runbook
 
 1. **Add the One-time PIN identity provider.** Zero Trust > Settings > Authentication > Add new > One-time PIN. New Zero Trust organizations default to the Cloudflare identity provider only, so this is an explicit step.
-2. **Create the Access application.** Zero Trust > Access > Applications > Add > Self-hosted, covering `checkdeploymanager.<your-account>.workers.dev/manage*` and `/api*`. Policy: Allow, Emails ending in `@your-domain`. Record the application AUD tag.
-3. **Set Worker variables.** In the Worker's Settings > Variables, set `ACCESS_TEAM_DOMAIN` to `<your-team>.cloudflareaccess.com` and `ACCESS_APP_AUD` to the AUD tag from step 2. Until both are set, the Worker rejects every management request.
-4. **Attach your custom domain** (optional but recommended, since the hostname gets baked into client policies). Worker > Settings > Domains and Routes. Add the same hostname paths to the Access application.
+2. **Create the Access application.** Zero Trust > Access controls > Applications > Add > Self-hosted. Add destinations for `manage*` and `api*` on each hostname (destination type Workers for the `workers.dev` hostname, Public DNS for a custom one); never a blank path, which would put the public rules endpoints behind Access and break the extension. Policy: Allow, Emails ending in `@your-domain`. The AUD tag lives on the saved app's Additional Settings tab.
+3. **Set Worker variables.** In the Worker's Settings > Variables, set `ACCESS_TEAM_DOMAIN` to `<your-team>.cloudflareaccess.com` and `ACCESS_APP_AUD` to the AUD tag from step 2, both as plain Text. Until both are set, the Worker rejects every management request.
+4. **Attach your custom domain** (recommended before your first login: Access sets cookies by bouncing through every app hostname, so a not-yet-serving hostname in the app breaks logins). Worker > Settings > Domains and Routes > Custom domain; DNS and TLS are automatic.
 5. **First-run configuration.** Open `https://<your-hostname>/manage`, authenticate, and set instance settings: public base URL, default CIPP server URL (if any), retention values, and the stale-fetch threshold.
 6. **Trigger the first upstream sync** from the Upstream page (or wait for the daily cron) and confirm the snapshot validates.
 7. **Create tenant zero** (your own organization), publish, and point a test browser's Config URL at it.
