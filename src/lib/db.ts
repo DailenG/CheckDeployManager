@@ -225,7 +225,7 @@ export async function countFetchHit(
         "not_modified = not_modified + excluded.not_modified, " +
         "last_fetch_at = excluded.last_fetch_at",
     )
-    .bind(tenantId, guid, today(), 1, notModified ? 1 : 0, nowIso())
+    .bind(tenantId, guid, today(), notModified ? 0 : 1, notModified ? 1 : 0, nowIso())
     .run();
 }
 
