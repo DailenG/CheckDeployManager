@@ -1,0 +1,50 @@
+[
+  {
+    "field": "Custom Rules / Config URL",
+    "value": "https://check.widedata.host/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json"
+  },
+  {
+    "field": "CIPP Reporting",
+    "value": "Enabled"
+  },
+  {
+    "field": "CIPP Server URL",
+    "value": "https://cipp.widedata.com"
+  },
+  {
+    "field": "Tenant ID / Domain",
+    "value": "harborviewpt.onmicrosoft.com"
+  },
+  {
+    "field": "Company Name",
+    "value": "WideData Corporation"
+  },
+  {
+    "field": "Product Name",
+    "value": "WideData Phishing Protection"
+  },
+  {
+    "field": "Support Email",
+    "value": "support@widedata.com"
+  },
+  {
+    "field": "Support URL",
+    "value": "https://support.widedata.com"
+  },
+  {
+    "field": "Privacy Policy URL",
+    "value": "https://widedata.com/privacy"
+  },
+  {
+    "field": "About URL",
+    "value": ""
+  },
+  {
+    "field": "Primary Color",
+    "value": "#1B6FA8"
+  },
+  {
+    "field": "Logo URL",
+    "value": "https://check.widedata.host/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo"
+  }
+]

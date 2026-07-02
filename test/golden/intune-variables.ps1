@@ -1,0 +1,17 @@
+$enableCippReporting = 1
+$cippServerUrl = "https://cipp.widedata.com"
+$cippTenantId = "harborviewpt.onmicrosoft.com"
+$customRulesUrl = "https://check.widedata.host/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json"
+$urlAllowlist = @("https://training.knowbe4.com/*", "https://*.harborviewpt.com/*")
+$enableGenericWebhook = 1
+$webhookUrl = "https://check.widedata.host/hook/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34"
+$webhookEvents = @("false_positive_report", "page_blocked", "threat_detected")
+$companyName = "WideData Corporation"
+$productName = "WideData Phishing Protection"
+$supportEmail = "support@widedata.com"
+$supportUrl = "https://support.widedata.com"
+$privacyPolicyUrl = "https://widedata.com/privacy"
+$aboutUrl = ""
+$primaryColor = "#1B6FA8"
+$logoUrl = "https://check.widedata.host/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo"
+$domainSquattingEnabled = 1

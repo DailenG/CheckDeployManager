@@ -1,0 +1,45 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge\ExtensionSettings\knepjpocdagponkonnbggpcnhnaikajg]
+"installation_mode"="force_installed"
+"update_url"="https://edge.microsoft.com/extensionwebstorebase/v1/crx"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy]
+"customRulesUrl"="https://check.widedata.host/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json"
+"updateInterval"=dword:00000018
+"enablePageBlocking"=dword:00000001
+"showNotifications"=dword:00000001
+"enableValidPageBadge"=dword:00000001
+"validPageBadgeTimeout"=dword:00000005
+"enableDebugLogging"=dword:00000000
+"enableCippReporting"=dword:00000001
+"cippServerUrl"="https://cipp.widedata.com"
+"cippTenantId"="harborviewpt.onmicrosoft.com"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\urlAllowlist]
+"1"="https://training.knowbe4.com/*"
+"2"="https://*.harborviewpt.com/*"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\genericWebhook]
+"enabled"=dword:00000001
+"url"="https://check.widedata.host/hook/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\genericWebhook\events]
+"1"="false_positive_report"
+"2"="page_blocked"
+"3"="threat_detected"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\domainSquatting]
+"enabled"=dword:00000001
+"deviationThreshold"=dword:00000002
+"Action"="block"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\customBranding]
+"companyName"="WideData Corporation"
+"productName"="WideData Phishing Protection"
+"supportEmail"="support@widedata.com"
+"supportUrl"="https://support.widedata.com"
+"privacyPolicyUrl"="https://widedata.com/privacy"
+"aboutUrl"=""
+"primaryColor"="#1B6FA8"
+"logoUrl"="https://check.widedata.host/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo"

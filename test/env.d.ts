@@ -2,6 +2,11 @@
 
 // The test runner's ProvidedEnv extends the global Cloudflare.Env, so the
 // bindings are declared there. TEST_MIGRATIONS is injected by vitest.config.
+declare module "*?raw" {
+  const content: string;
+  export default content;
+}
+
 declare namespace Cloudflare {
   interface Env {
     DB: D1Database;
