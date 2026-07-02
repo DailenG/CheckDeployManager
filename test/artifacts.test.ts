@@ -88,10 +88,10 @@ describe("artifact guardrails", () => {
       ...HARBORVIEW_ARTIFACT_INPUT,
       branding: {
         ...HARBORVIEW_ARTIFACT_INPUT.branding,
-        company_name: "WideData™ Corporation",
+        company_name: "Example™ MSP",
       },
     });
-    expect(withNonAscii.intune_variables).toContain('"WideData? Corporation"');
+    expect(withNonAscii.intune_variables).toContain('"Example? MSP"');
   });
 });
 
@@ -168,7 +168,7 @@ describe("GET /api/tenants/{id}/artifacts", () => {
     ).json<any>();
     await api(
       `/api/tenants/${created.id}/branding`,
-      jsonInit("PUT", { company_name: "WideData Corporation" }),
+      jsonInit("PUT", { company_name: "Example MSP" }),
     );
     await api(
       `/api/tenants/${created.id}/policy`,
@@ -192,7 +192,7 @@ describe("GET /api/tenants/{id}/artifacts", () => {
       "https://cipp.example.test",
     );
     expect(artifacts.chrome_managed_storage.customBranding.companyName).toBe(
-      "WideData Corporation",
+      "Example MSP",
     );
     // No logo uploaded, so logoUrl stays empty.
     expect(artifacts.chrome_managed_storage.customBranding.logoUrl).toBe("");

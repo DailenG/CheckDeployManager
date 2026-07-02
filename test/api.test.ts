@@ -237,20 +237,20 @@ describe("branding", () => {
     const response = await api(
       `/api/tenants/${created.id}/branding`,
       jsonInit("PUT", {
-        company_name: "WideData Corporation",
-        product_name: "WideData Phishing Protection",
+        company_name: "Example MSP",
+        product_name: "Example MSP Phishing Protection",
         primary_color: "#1B6FA8",
       }),
     );
     expect(response.status).toBe(200);
     const body = await response.json<any>();
-    expect(body.branding.company_name).toBe("WideData Corporation");
+    expect(body.branding.company_name).toBe("Example MSP");
   });
 
   it("accepts a valid logo upload and serves it publicly", async () => {
     const created = await createTenantViaApi();
     const form = new FormData();
-    form.set("company_name", "WideData Corporation");
+    form.set("company_name", "Example MSP");
     form.set(
       "logo",
       new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "logo.png", {

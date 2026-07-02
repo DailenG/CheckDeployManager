@@ -1,6 +1,6 @@
 # CheckDeployManager - Design Document
 
-Central, multi tenant configuration service for the Check by CyberDrain browser extension, hosted entirely on Cloudflare, operated by WideData Corporation, published open source under MIT at `github.com/DailenG/CheckDeployManager`.
+Central, multi tenant configuration service for the Check by CyberDrain browser extension, hosted entirely on Cloudflare, operated by Example MSP, published open source under MIT at `github.com/DailenG/CheckDeployManager`.
 
 Status: Design approved-pending-review. Scope: Tier 2 (rules host plus policy generator). All decisions below were dispositioned during discovery rounds 1 and 2.
 
@@ -25,12 +25,12 @@ flowchart LR
         EXT["Check extension\n(Chrome / Edge / Firefox)"]
     end
 
-    subgraph Operator["WDC operators"]
+    subgraph Operator["MSP operators"]
         OP["Browser -> /manage"]
     end
 
     subgraph CF["Cloudflare (free tier)"]
-        ACCESS["Cloudflare Access\n(OTP, @widedata.com)"]
+        ACCESS["Cloudflare Access\n(OTP, @example.com)"]
         W["Worker: CheckDeployManager\n- /rules/{guid}.json\n- /assets/{guid}/logo\n- /hook/{guid}\n- /preview/{token}.json\n- /manage (static UI)\n- /api/* (management API)\n- cron: upstream sync + retention"]
         D1[("D1\ntenants, GUIDs, deltas,\nversions, settings, audit,\nmetrics, webhook events")]
         R2[("R2\nupstream snapshots,\npublished rulesets,\nlogos")]
@@ -61,7 +61,7 @@ flowchart LR
 - Rules composition: **Option A**, mirror upstream + per tenant deltas, daily cron, **auto-publish** after validation gates pass, diff notice + one-click rollback as the safety net.
 - Tenant addressing: **path form** `/rules/{guid}.json`. Cleaner in policy files, cache-friendly, avoids query string mangling by proxies, and the `.json` suffix self-documents content type.
 - KV: **not used in v1**. The 1k writes/day free cap constrains invalidation patterns, and R2 Class B quota (10M/month) plus browser-side ETag/304 makes a cache layer unnecessary at this workload. Verdict on the baseline "KV only if justified": not justified.
-- Draft/publish per tenant with immutable versions and rollback; separate unguessable preview URL per tenant for drafts; WDC enrolls itself as tenant zero (documented practice, not a code feature).
+- Draft/publish per tenant with immutable versions and rollback; separate unguessable preview URL per tenant for drafts; the operating MSP enrolls itself as tenant zero (documented practice, not a code feature).
 - Revoked GUID: **404**. Rotation issues a new GUID while the old stays active until explicitly revoked; dashboard shows hit counts on both during migration.
 - Retention: request metrics 7 days (configurable), operator audit log indefinite, webhook events until dispositioned or 90 days (configurable).
 - Dashboard UI defaults to **dark mode** with a light toggle.
@@ -220,7 +220,7 @@ The tenant never edits the full ruleset. The delta is small, auditable, and surv
 }
 ```
 
-Merge semantics: arrays append onto the upstream section, `suppress_indicator_ids` removes upstream indicators by id, `raw_overrides` deep-merges last for escape-hatch cases. The merged output keeps the upstream `version` with a tenant suffix (`1.2.3+wdc.7`) and stamps `lastUpdated` at publish time.
+Merge semantics: arrays append onto the upstream section, `suppress_indicator_ids` removes upstream indicators by id, `raw_overrides` deep-merges last for escape-hatch cases. The merged output keeps the upstream `version` with a tenant suffix (`1.2.3+msp.7`) and stamps `lastUpdated` at publish time.
 
 ### 2.4 Validation gates (run on every publish and every upstream sync)
 
@@ -291,9 +291,9 @@ Dashboard indicators (v1 observability, per discovery): last fetch per tenant, w
 
 ## 4. Authentication and Authorization
 
-- **Cloudflare Access self-hosted application** covering `check.widedata.host/manage*` and `check.widedata.host/api*` (and the `workers.dev` host during initial setup). Policy: allow emails ending `@widedata.com`. Identity provider: One-time PIN. Note: new Zero Trust orgs default to the Cloudflare identity provider and OTP is no longer added automatically, so adding the OTP IdP is an explicit runbook step. Free plan covers up to 50 users, which comfortably fits the WDC team.
+- **Cloudflare Access self-hosted application** covering `check.example.com/manage*` and `check.example.com/api*` (and the `workers.dev` host during initial setup). Policy: allow emails ending `@example.com`. Identity provider: One-time PIN. Note: new Zero Trust orgs default to the Cloudflare identity provider and OTP is no longer added automatically, so adding the OTP IdP is an explicit runbook step. Free plan covers up to 50 users, which comfortably fits the MSP team.
 - **Defense in depth in the Worker.** Every `/api` and `/manage` request validates the `cf-access-jwt-assertion` JWT: signature against the team JWKS (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`), `aud` equals the Access app AUD tag, expiry. The verified email claim becomes the audit identity. A request without a valid JWT is rejected even if a routing mistake ever exposed the path. Team domain and AUD tag are Worker environment variables set post-deploy (they are identifiers, not secrets).
-- **Authorization model:** flat. Every authenticated WDC operator can manage every tenant; the audit log provides accountability. No per-tenant permissions in v1 (single-MSP tool).
+- **Authorization model:** flat. Every authenticated operator can manage every tenant; the audit log provides accountability. No per-tenant permissions in v1 (single-MSP tool).
 - **No handwritten auth, no passwords, no API keys, no secrets in the repo.** v1 requires zero Worker secrets.
 
 The public endpoints (`/rules`, `/preview`, `/assets`, `/hook`) are intentionally outside Access because the extension cannot authenticate; unguessable 128-bit identifiers, uniform 404s, and rate limiting (section 8) are the controls there.
@@ -304,10 +304,10 @@ The public endpoints (`/rules`, `/preview`, `/assets`, `/hook`) are intentionall
 
 Generated per tenant from D1 state, always current, shown in the dashboard with copy buttons and file downloads. Fictional sample tenant throughout:
 
-- Tenant: **Harborview Physical Therapy** (client of WDC)
+- Tenant: **Harborview Physical Therapy** (client of the MSP)
 - GUID: `f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34`
-- Config URL: `https://check.widedata.host/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json`
-- Logo URL: `https://check.widedata.host/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo`
+- Config URL: `https://check.example.com/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json`
+- Logo URL: `https://check.example.com/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo`
 
 ### 5.1 Chrome and Edge managed storage policy JSON
 
@@ -315,7 +315,7 @@ The `3rdparty > Extensions > <extension-id>` payload (Chrome id `benimdeioplgkha
 
 ```json
 {
-  "customRulesUrl": "https://check.widedata.host/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json",
+  "customRulesUrl": "https://check.example.com/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json",
   "updateInterval": 24,
   "enablePageBlocking": true,
   "showNotifications": true,
@@ -327,11 +327,11 @@ The `3rdparty > Extensions > <extension-id>` payload (Chrome id `benimdeioplgkha
     "https://*.harborviewpt.com/*"
   ],
   "enableCippReporting": true,
-  "cippServerUrl": "https://cipp.widedata.com",
+  "cippServerUrl": "https://cipp.example.com",
   "cippTenantId": "harborviewpt.onmicrosoft.com",
   "genericWebhook": {
     "enabled": true,
-    "url": "https://check.widedata.host/hook/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34",
+    "url": "https://check.example.com/hook/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34",
     "events": ["false_positive_report", "page_blocked", "threat_detected"]
   },
   "domainSquatting": {
@@ -340,14 +340,14 @@ The `3rdparty > Extensions > <extension-id>` payload (Chrome id `benimdeioplgkha
     "Action": "block"
   },
   "customBranding": {
-    "companyName": "WideData Corporation",
-    "productName": "WideData Phishing Protection",
-    "supportEmail": "support@widedata.com",
-    "supportUrl": "https://support.widedata.com",
-    "privacyPolicyUrl": "https://widedata.com/privacy",
+    "companyName": "Example MSP",
+    "productName": "Example MSP Phishing Protection",
+    "supportEmail": "support@example.com",
+    "supportUrl": "https://support.example.com",
+    "privacyPolicyUrl": "https://example.com/privacy",
     "aboutUrl": "",
     "primaryColor": "#1B6FA8",
-    "logoUrl": "https://check.widedata.host/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo"
+    "logoUrl": "https://check.example.com/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo"
   }
 }
 ```
@@ -364,7 +364,7 @@ Firefox extension id is `check@cyberdrain.com`:
     "3rdparty": {
       "Extensions": {
         "check@cyberdrain.com": {
-          "customRulesUrl": "https://check.widedata.host/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json",
+          "customRulesUrl": "https://check.example.com/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json",
           "updateInterval": 24,
           "enablePageBlocking": true,
           "showNotifications": true,
@@ -375,22 +375,22 @@ Firefox extension id is `check@cyberdrain.com`:
             "https://*.harborviewpt.com/*"
           ],
           "enableCippReporting": true,
-          "cippServerUrl": "https://cipp.widedata.com",
+          "cippServerUrl": "https://cipp.example.com",
           "cippTenantId": "harborviewpt.onmicrosoft.com",
           "genericWebhook": {
             "enabled": true,
-            "url": "https://check.widedata.host/hook/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34",
+            "url": "https://check.example.com/hook/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34",
             "events": ["false_positive_report", "page_blocked", "threat_detected"]
           },
           "customBranding": {
-            "companyName": "WideData Corporation",
-            "productName": "WideData Phishing Protection",
-            "supportEmail": "support@widedata.com",
-            "supportUrl": "https://support.widedata.com",
-            "privacyPolicyUrl": "https://widedata.com/privacy",
+            "companyName": "Example MSP",
+            "productName": "Example MSP Phishing Protection",
+            "supportEmail": "support@example.com",
+            "supportUrl": "https://support.example.com",
+            "privacyPolicyUrl": "https://example.com/privacy",
             "aboutUrl": "",
             "primaryColor": "#1B6FA8",
-            "logoUrl": "https://check.widedata.host/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo"
+            "logoUrl": "https://check.example.com/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo"
           }
         }
       }
@@ -413,7 +413,7 @@ Windows Registry Editor Version 5.00
 "update_url"="https://clients2.google.com/service/update2/crx"
 
 [HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy]
-"customRulesUrl"="https://check.widedata.host/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json"
+"customRulesUrl"="https://check.example.com/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json"
 "updateInterval"=dword:00000018
 "enablePageBlocking"=dword:00000001
 "showNotifications"=dword:00000001
@@ -421,7 +421,7 @@ Windows Registry Editor Version 5.00
 "validPageBadgeTimeout"=dword:00000005
 "enableDebugLogging"=dword:00000000
 "enableCippReporting"=dword:00000001
-"cippServerUrl"="https://cipp.widedata.com"
+"cippServerUrl"="https://cipp.example.com"
 "cippTenantId"="harborviewpt.onmicrosoft.com"
 
 [HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\urlAllowlist]
@@ -430,7 +430,7 @@ Windows Registry Editor Version 5.00
 
 [HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\genericWebhook]
 "enabled"=dword:00000001
-"url"="https://check.widedata.host/hook/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34"
+"url"="https://check.example.com/hook/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34"
 
 [HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\genericWebhook\events]
 "1"="false_positive_report"
@@ -443,14 +443,14 @@ Windows Registry Editor Version 5.00
 "Action"="block"
 
 [HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\customBranding]
-"companyName"="WideData Corporation"
-"productName"="WideData Phishing Protection"
-"supportEmail"="support@widedata.com"
-"supportUrl"="https://support.widedata.com"
-"privacyPolicyUrl"="https://widedata.com/privacy"
+"companyName"="Example MSP"
+"productName"="Example MSP Phishing Protection"
+"supportEmail"="support@example.com"
+"supportUrl"="https://support.example.com"
+"privacyPolicyUrl"="https://example.com/privacy"
 "aboutUrl"=""
 "primaryColor"="#1B6FA8"
-"logoUrl"="https://check.widedata.host/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo"
+"logoUrl"="https://check.example.com/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo"
 ```
 
 For admins using the Check ADMX (Deploy-ADMX.ps1 workflow), the dashboard also renders the same values as a field-by-field table matching the template UI under `Computer Configuration > Policies > Administrative Templates > CyberDrain > Check`.
@@ -461,21 +461,21 @@ Tier 2 emits values, not packages. The generator renders the exact variable assi
 
 ```powershell
 $enableCippReporting = 1
-$cippServerUrl = "https://cipp.widedata.com"
+$cippServerUrl = "https://cipp.example.com"
 $cippTenantId = "harborviewpt.onmicrosoft.com"
-$customRulesUrl = "https://check.widedata.host/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json"
+$customRulesUrl = "https://check.example.com/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json"
 $urlAllowlist = @("https://training.knowbe4.com/*", "https://*.harborviewpt.com/*")
 $enableGenericWebhook = 1
-$webhookUrl = "https://check.widedata.host/hook/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34"
+$webhookUrl = "https://check.example.com/hook/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34"
 $webhookEvents = @("false_positive_report", "page_blocked", "threat_detected")
-$companyName = "WideData Corporation"
-$productName = "WideData Phishing Protection"
-$supportEmail = "support@widedata.com"
-$supportUrl = "https://support.widedata.com"
-$privacyPolicyUrl = "https://widedata.com/privacy"
+$companyName = "Example MSP"
+$productName = "Example MSP Phishing Protection"
+$supportEmail = "support@example.com"
+$supportUrl = "https://support.example.com"
+$privacyPolicyUrl = "https://example.com/privacy"
 $aboutUrl = ""
 $primaryColor = "#1B6FA8"
-$logoUrl = "https://check.widedata.host/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo"
+$logoUrl = "https://check.example.com/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo"
 $domainSquattingEnabled = 1
 ```
 
@@ -487,9 +487,9 @@ CIPP's `deploycheckchromeextension` standard builds the install and detection sc
 
 | CIPP standard field | Value |
 |---|---|
-| Custom Rules / Config URL | `https://check.widedata.host/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json` |
+| Custom Rules / Config URL | `https://check.example.com/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json` |
 | CIPP Reporting | Enabled |
-| CIPP Server URL | `https://cipp.widedata.com` |
+| CIPP Server URL | `https://cipp.example.com` |
 | Tenant ID / Domain | `harborviewpt.onmicrosoft.com` (auto-filled per CIPP tenant) |
 | Branding fields | Same values as section 5.1 `customBranding` |
 
@@ -567,7 +567,7 @@ Repo hygiene rules (enforced in CONTRIBUTING and CI lint): no secrets, no tokens
 Notes:
 
 - Bindings carry default names and blank IDs so the Deploy button (and Wrangler auto-provisioning) creates and links the resources on first deploy.
-- No `routes` block ships in the repo: the custom domain is instance specific (`check.widedata.host` for WDC) and is attached post-deploy so other deployers are not broken by a hardcoded WDC hostname. The app derives self-referencing URLs from `instance_settings.public_base_url`.
+- No `routes` block ships in the repo: the custom domain is instance specific (`check.example.com` in the examples) and is attached post-deploy so deployers are not broken by a hardcoded hostname. The app derives self-referencing URLs from `instance_settings.public_base_url`.
 - `ACCESS_TEAM_DOMAIN` / `ACCESS_APP_AUD` are non-secret identifiers filled in post-deploy; until they are set, the Worker fails closed on all `/api` and `/manage` requests.
 - `package.json` deploy script runs `wrangler d1 migrations apply DB --remote` before `wrangler deploy`, referencing the binding name so migrations succeed regardless of the database name a deployer chooses (the button auto-detects and pre-populates this deploy command).
 
@@ -582,16 +582,16 @@ From the README button (`https://deploy.workers.cloudflare.com/?url=https://gith
 ### 7.2 Post-deploy runbook (everything the button cannot do)
 
 1. **Add the One-time PIN identity provider.** Zero Trust > Settings > Authentication (new orgs default to the Cloudflare IdP; OTP must be added manually).
-2. **Create the Access application.** Self-hosted app covering `checkdeploymanager.<account>.workers.dev/manage*` and `/api*`. Policy: Allow, Emails ending in `@widedata.com`. Record the application AUD tag.
+2. **Create the Access application.** Self-hosted app covering `checkdeploymanager.<account>.workers.dev/manage*` and `/api*`. Policy: Allow, Emails ending in `@example.com`. Record the application AUD tag.
 3. **Set Worker variables.** `ACCESS_TEAM_DOMAIN` = `<team>.cloudflareaccess.com`, `ACCESS_APP_AUD` = the AUD tag (dashboard > Worker > Settings > Variables). Redeploy is automatic.
-4. **Attach the custom domain.** Worker > Settings > Domains and Routes > add `check.widedata.host` (zone `widedata.host` is already on Cloudflare Registrar, so this is one click). Add the same hostname paths to the Access application.
-5. **First-run configuration.** Open `https://check.widedata.host/manage`, authenticate via OTP, set instance settings: public base URL (`https://check.widedata.host`), default CIPP server URL (`https://cipp.widedata.com`), retention values (defaults 7/90), stale-fetch threshold (48 h).
+4. **Attach the custom domain.** Worker > Settings > Domains and Routes > add `check.example.com` (zone `example.com` is already on Cloudflare Registrar, so this is one click). Add the same hostname paths to the Access application.
+5. **First-run configuration.** Open `https://check.example.com/manage`, authenticate via OTP, set instance settings: public base URL (`https://check.example.com`), default CIPP server URL (`https://cipp.example.com`), retention values (defaults 7/90), stale-fetch threshold (48 h).
 6. **Trigger the first upstream sync** from the dashboard (or wait for the daily cron) and confirm the snapshot validates.
-7. **Create tenant zero (WideData internal)**, publish, and point a test browser's Config URL at it.
+7. **Create tenant zero (the MSP itself)**, publish, and point a test browser's Config URL at it.
 8. **Create the first client tenant**, upload logo, set branding/policy, publish, generate artifacts, deploy the policy to a pilot device, verify a fetch appears on the dashboard.
 9. **Optional hardening:** WAF rate-limiting rule on `/rules/*` and `/hook/*` (free plan includes custom rules), and Cloudflare notification for Workers usage approaching limits.
 
-Steps 1 through 4 are one-time; 5 through 8 are the operational bring-up. The public README carries this runbook genericized (no WDC values).
+Steps 1 through 4 are one-time; 5 through 8 are the operational bring-up. The public README carries this runbook genericized (no operator-specific values).
 
 ---
 
@@ -610,7 +610,7 @@ Assets worth protecting: integrity of served detection rules (tampering would we
 | Access lockout | OTP IdP misconfigured or team domain typo | Break-glass: account owner can edit the Access policy from the Cloudflare dashboard, which is independent of this app |
 | Repo leakage | Secrets or client data committed | None required by design (zero secrets in v1); CONTRIBUTING rule + CI grep for GUID/email patterns in fixtures |
 
-Privacy: fetch metrics store GUID-level counters only (no client IPs retained beyond Cloudflare's own edge logs); webhook payloads are the most sensitive stored data and follow the 90-day/disposition retention; the operator audit log stores WDC operator emails only. Log retention values are instance settings, satisfying the configurable requirement.
+Privacy: fetch metrics store GUID-level counters only (no client IPs retained beyond Cloudflare's own edge logs); webhook payloads are the most sensitive stored data and follow the 90-day/disposition retention; the operator audit log stores operator emails only. Log retention values are instance settings, satisfying the configurable requirement.
 
 Licensing: MIT for this repository. AGPL-3.0 obligations do not attach because no Check source code is reused; the service only produces and serves JSON that Check consumes.
 
@@ -629,7 +629,7 @@ Licensing: MIT for this repository. AGPL-3.0 obligations do not attach because n
 ### 9.2 Manual verification checklist (runbook appendix)
 
 1. `curl -i` the tenant rules URL: verify CORS, ETag, content type; repeat with `If-None-Match` and confirm 304.
-2. Load Check in a test browser, set Config URL to the tenant preview URL, use Update Rules Now, confirm the Configuration Overview shows the tenant version string (`x.y.z+wdc.n`).
+2. Load Check in a test browser, set Config URL to the tenant preview URL, use Update Rules Now, confirm the Configuration Overview shows the tenant version string (`x.y.z+msp.n`).
 3. Confirm a tenant exclusion works: add a phishing-simulation domain to the delta, publish, verify the extension no longer flags it.
 4. Import the generated .reg on a test VM, `gpupdate /force`, verify managed-by-policy banner and values in the extension options page.
 5. Firefox: place generated policies.json, restart, verify branding and Config URL applied.
@@ -659,8 +659,8 @@ Licensing: MIT for this repository. AGPL-3.0 obligations do not attach because n
 
 - Workload up to a few thousand endpoints, ~1 rules fetch per endpoint per day, infrequent operator writes: verified to fit free tier with wide margin (Workers 100k req/day, D1 5M reads / 100k writes per day, R2 10 GB + 1M Class A + 10M Class B per month, Access free to 50 users).
 - Chrome/Edge extension IDs and the Firefox id `check@cyberdrain.com` remain stable; managed schema drift is tolerated by the pass-through merge design and surfaced by the daily diff.
-- `widedata.host` remains on Cloudflare; `check.widedata.host` is dedicated to this service permanently, since it is baked into client policies.
-- WDC team stays under 50 Access seats.
+- `example.com` remains on Cloudflare; `check.example.com` is dedicated to this service permanently, since it is baked into client policies.
+- MSP team stays under 50 Access seats.
 
 ### 10.3 Risks
 
@@ -683,4 +683,4 @@ Two concrete conflicts between section 6.2 and platform reality surfaced during 
 1. **`database_id` is omitted rather than blank.** Wrangler v4 rejects an empty-string `database_id` at `wrangler dev` startup. Omitting the key entirely preserves the intended behavior: the Deploy to Cloudflare button and Wrangler auto-provisioning create and link the database on first deploy.
 2. **`run_worker_first` added for `/manage` paths.** With a static assets binding, asset requests are served before the Worker runs by default, which would have bypassed the in-Worker Access JWT validation on `/manage`. `"run_worker_first": ["/manage", "/manage/*"]` routes those paths through the Worker so the defense-in-depth check from section 4 actually executes; the Worker then serves the asset via the `ASSETS` binding after validation.
 
-One addition: the published version suffix label (`1.2.3+wdc.7` in the examples) is the instance setting `version_suffix_label`, defaulting to `cdm` so a fresh open source install carries no WDC branding. WDC sets it to `wdc` during first-run configuration.
+One addition: the published version suffix label (`1.2.3+msp.7` in the examples) is the instance setting `version_suffix_label`, defaulting to `cdm` so a fresh open source install carries no operator branding. Deployers set their own label during first-run configuration.

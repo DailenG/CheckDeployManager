@@ -1,7 +1,7 @@
 [
   {
     "field": "Custom Rules / Config URL",
-    "value": "https://check.widedata.host/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json"
+    "value": "https://check.example.com/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json"
   },
   {
     "field": "CIPP Reporting",
@@ -9,7 +9,7 @@
   },
   {
     "field": "CIPP Server URL",
-    "value": "https://cipp.widedata.com"
+    "value": "https://cipp.example.com"
   },
   {
     "field": "Tenant ID / Domain",
@@ -17,23 +17,23 @@
   },
   {
     "field": "Company Name",
-    "value": "WideData Corporation"
+    "value": "Example MSP"
   },
   {
     "field": "Product Name",
-    "value": "WideData Phishing Protection"
+    "value": "Example MSP Phishing Protection"
   },
   {
     "field": "Support Email",
-    "value": "support@widedata.com"
+    "value": "support@example.com"
   },
   {
     "field": "Support URL",
-    "value": "https://support.widedata.com"
+    "value": "https://support.example.com"
   },
   {
     "field": "Privacy Policy URL",
-    "value": "https://widedata.com/privacy"
+    "value": "https://example.com/privacy"
   },
   {
     "field": "About URL",
@@ -45,6 +45,6 @@
   },
   {
     "field": "Logo URL",
-    "value": "https://check.widedata.host/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo"
+    "value": "https://check.example.com/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo"
   }
 ]

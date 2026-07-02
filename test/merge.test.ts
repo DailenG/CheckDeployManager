@@ -5,7 +5,7 @@ import upstreamFixture from "./fixtures/upstream-snapshot.json";
 
 const upstream = upstreamFixture as unknown as Record<string, unknown>;
 const options = {
-  suffixLabel: "wdc",
+  suffixLabel: "msp",
   versionNumber: 7,
   publishedAt: "2026-07-01T00:00:00.000Z",
 };
@@ -72,14 +72,14 @@ describe("mergeRuleset", () => {
 
   it("suffixes the upstream version and stamps lastUpdated", () => {
     const merged = mergeRuleset(upstream, {}, options);
-    expect(merged.version).toBe(`${upstream.version}+wdc.7`);
+    expect(merged.version).toBe(`${upstream.version}+msp.7`);
     expect(merged.lastUpdated).toBe("2026-07-01T00:00:00.000Z");
   });
 
   it("does not stack suffixes when re-merging suffixed input", () => {
     const once = mergeRuleset(upstream, {}, options);
     const twice = mergeRuleset(once, {}, { ...options, versionNumber: 8 });
-    expect(twice.version).toBe(`${upstream.version}+wdc.8`);
+    expect(twice.version).toBe(`${upstream.version}+msp.8`);
   });
 
   it("is idempotent for identical inputs", () => {
