@@ -880,7 +880,7 @@ async function renderAudit() {
       <td>${esc(entry.operator_email)}</td>
       <td class="mono">${esc(entry.action)}</td>
       <td class="mono">${esc(entry.tenant_id || "")}</td>
-      <td class="mono">${esc(entry.details_json || "")}</td>
+      <td class="mono wrap">${esc(entry.details_json || "")}</td>
     </tr>`,
     )
     .join("");

@@ -93,6 +93,9 @@ th, td {
   vertical-align: top;
 }
 th { color: var(--muted); font-weight: 600; font-size: 13px; }
+/* Cells holding unbroken machine strings (JSON, ids) must be allowed to
+   break anywhere, or the table forces the page wider than the viewport. */
+td.wrap { overflow-wrap: anywhere; }
 tr.clickable { cursor: pointer; }
 tr.clickable:hover td { background: var(--panel-2); }
 
