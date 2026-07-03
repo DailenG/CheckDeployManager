@@ -3,3 +3,6 @@ node_modules/
 .dev.vars
 dist/
 *.log
+
+# Local GitNexus code-intelligence index (docs/wiki is the committed mirror)
+.gitnexus/

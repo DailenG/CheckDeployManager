@@ -19,7 +19,9 @@ npm test
 
 The stack is fixed: TypeScript on Workers, Hono for routing, D1 and R2 for storage, a dependency-free vanilla JS dashboard with no build step, and Vitest with `@cloudflare/vitest-pool-workers`. Please do not introduce frontend frameworks, KV, or additional runtime dependencies without discussion.
 
-## Repository rules (enforced in review)
+## Repository rules (enforced in review and CI)
+
+CI (`.github/workflows/ci.yml`) runs `npm run typecheck` and `npm test`, and greps every tracked file for em dashes, unexpected UUID literals, and a tracked `.dev.vars`. Rules that grep cannot catch (real client names, fabricated schema fields) remain review responsibilities.
 
 1. **No secrets, ever.** No tokens, API keys, credentials, or `.dev.vars` contents. The design requires zero Worker secrets; keep it that way.
 2. **No real client data.** No real client names, real tenant GUIDs, real hostnames of managed organizations, or captured webhook payloads. All fixtures and samples use the fictional tenant from the design: Harborview Physical Therapy, GUID `f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34`.
@@ -33,7 +35,7 @@ The stack is fixed: TypeScript on Workers, Hono for routing, D1 and R2 for stora
 - Every validation gate has a failing fixture.
 - Artifact generators are golden-file tested. If you intentionally change generator output, regenerate goldens with `node scripts/generate-goldens.mjs` (bundle it first if your Node cannot strip types: `npx esbuild scripts/generate-goldens.mjs --bundle --format=esm --platform=node --outfile=.wrangler/tmp.mjs && node .wrangler/tmp.mjs`) and include the diff in your PR description.
 - Tests must not depend on the network. The upstream fixture under `test/fixtures/` is a checked-in snapshot of the real CyberDrain rules file; refresh it deliberately, not incidentally.
-- `npm test` and `npx tsc --noEmit` must both pass.
+- `npm test` and `npm run typecheck` must both pass.
 
 ## Documentation
 

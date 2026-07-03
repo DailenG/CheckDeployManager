@@ -2,7 +2,7 @@
 
 Multi tenant configuration service for the [Check by CyberDrain](https://docs.check.tech) browser extension, hosted entirely on Cloudflare Workers. Built for MSPs that manage Check across many client organizations, and comfortably inside the Cloudflare free tier at a few thousand endpoints.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/DailenG/CheckDeployManager)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/DailenG/CheckDeployManager) [![CI](https://github.com/DailenG/CheckDeployManager/actions/workflows/ci.yml/badge.svg)](https://github.com/DailenG/CheckDeployManager/actions/workflows/ci.yml)
 
 ## What it does
 

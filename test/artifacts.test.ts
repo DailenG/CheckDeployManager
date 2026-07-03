@@ -67,7 +67,8 @@ describe("artifact guardrails", () => {
   const everything = JSON.stringify(bundle);
 
   it("contains no em dash anywhere", () => {
-    expect(everything.includes("—")).toBe(false);
+    // U+2014 spelled via charCode so this file passes the repo-wide CI grep.
+    expect(everything.includes(String.fromCharCode(0x2014))).toBe(false);
   });
 
   it("keeps PowerShell text free of && and non-ASCII", () => {

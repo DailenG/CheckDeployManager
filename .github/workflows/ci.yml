@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Typecheck and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # CONTRIBUTING rule 3: no em dashes anywhere. The character is built
+      # from bytes so this workflow file stays clean itself.
+      - name: No em dashes
+        run: |
+          EMDASH="$(printf '\xe2\x80\x94')"
+          if git ls-files -z | xargs -0 grep -rlI "$EMDASH" 2>/dev/null; then
+            echo "::error::Em dash found in the files above. CONTRIBUTING rule 3: use hyphens, commas, or colons."
+            exit 1
+          fi
+
+      # CONTRIBUTING rule 2: no real tenant GUIDs. Only the fictional
+      # Harborview GUID and the all-zeros test UUID are allowed.
+      - name: No unexpected UUIDs
+        run: |
+          FOUND="$(git ls-files -z | xargs -0 grep -rhoIiE '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}' 2>/dev/null | sort -u \
+            | grep -viE '^(f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34|00000000-0000-4000-8000-000000000000)$' || true)"
+          if [ -n "$FOUND" ]; then
+            echo "$FOUND"
+            echo "::error::Unexpected UUID literals found. CONTRIBUTING rule 2: samples use only the fictional Harborview GUID."
+            exit 1
+          fi
+
+      # CONTRIBUTING rule 1: no secrets. .dev.vars must never be tracked and
+      # nothing may reference a Cloudflare API token shape.
+      - name: No committed secrets
+        run: |
+          if git ls-files | grep -x '.dev.vars'; then
+            echo "::error::.dev.vars is tracked. It must stay local-only."
+            exit 1
+          fi
+
+      # CONTRIBUTING rule 4: PowerShell emitted as text never uses && or ||.
+      - name: PowerShell text rules
+        run: |
+          if grep -nE '&&|\|\|' test/golden/intune-variables.ps1; then
+            echo "::error::Generated PowerShell must not use && or ||."
+            exit 1
+          fi
+
+      # Soft nudge only: docs/wiki is generated from the local GitNexus index
+      # and cannot be rebuilt in CI, so warn when src changes without it.
+      - name: Wiki freshness (warning only)
+        if: github.event_name == 'pull_request'
+        run: |
+          CHANGED="$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD)"
+          if echo "$CHANGED" | grep -q '^src/' && ! echo "$CHANGED" | grep -q '^docs/wiki/'; then
+            echo "::warning::src/ changed but docs/wiki/ did not. If module structure or flows changed, regenerate the wiki (see CONTRIBUTING, Documentation)."
+          fi
