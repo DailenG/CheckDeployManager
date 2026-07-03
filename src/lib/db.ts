@@ -75,6 +75,9 @@ export const DEFAULT_INSTANCE_SETTINGS: Record<string, string> = {
     "https://raw.githubusercontent.com/CyberDrain/Check/main/rules/detection-rules.json",
   upstream_keep_snapshots: "10",
   version_suffix_label: "cdm",
+  // ISO timestamp once the setup wizard is finished or skipped; empty means
+  // the wizard is still offered. Not listed in the Settings page UI.
+  onboarding_completed_at: "",
 };
 
 export function nowIso(): string {

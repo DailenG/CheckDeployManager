@@ -16,6 +16,17 @@ Current work queue, in order. Update as items land.
 
 ## 1. Onboarding wizard on first login
 
+**Status (2026-07-03):** in progress.
+
+- [x] 1.1 first-login detection: `onboarding_completed_at` key with
+      legacy auto-complete on first seed only (guards against a fresh
+      instance auto-completing mid-wizard after its settings step)
+- [x] 1.2 `GET /api/instance/status` aggregate endpoint
+- [x] 1.4 backend tests (4 new, 102 total passing)
+- [ ] 1.3 wizard UI `#/setup`, redirect, nav link
+- [ ] 1.5 docs (README runbook note, docs/runbook.md)
+- [ ] wiki regeneration after merge
+
 **Goal:** guide a fresh deployment through runbook steps 5 through 8 (instance
 settings, first upstream sync, tenant zero, first deployment test) directly in
 the management UI. Runbook steps 1 through 4 (identity provider, Access app,

@@ -418,6 +418,88 @@ describe("instance settings", () => {
   });
 });
 
+describe("instance status", () => {
+  it("reports a fresh instance as not onboarded with all checks false", async () => {
+    const response = await api("/api/instance/status");
+    expect(response.status).toBe(200);
+    const body = await response.json<any>();
+    expect(body.operator_email).toBe(DEV_OPERATOR);
+    expect(body.environment).toBe("development");
+    expect(body.onboarding_complete).toBe(false);
+    expect(body.checks).toEqual({
+      settings_configured: false,
+      upstream_synced: false,
+      upstream_version: null,
+      upstream_fetched_at: null,
+      tenant_count: 0,
+      any_published: false,
+    });
+  });
+
+  it("flips checks as settings, upstream, tenant, and publish land", async () => {
+    // First read seeds the onboarding key, mirroring a fresh instance
+    // loading the wizard before any configuration happens.
+    await api("/api/instance/status");
+    await api(
+      "/api/instance/settings",
+      jsonInit("PUT", {
+        settings: { public_base_url: "https://check.example.test" },
+      }),
+    );
+    await seedUpstream(fixtureBody);
+    const created = await api(
+      "/api/tenants",
+      jsonInit("POST", { name: "Harborview Physical Therapy" }),
+    );
+    const tenant = await created.json<any>();
+    const published = await api(`/api/tenants/${tenant.id}/publish`, {
+      method: "POST",
+    });
+    expect(published.status).toBe(200);
+
+    const body = await (await api("/api/instance/status")).json<any>();
+    expect(body.checks.settings_configured).toBe(true);
+    expect(body.checks.upstream_synced).toBe(true);
+    expect(body.checks.upstream_version).not.toBeNull();
+    expect(body.checks.upstream_fetched_at).not.toBeNull();
+    expect(body.checks.tenant_count).toBe(1);
+    expect(body.checks.any_published).toBe(true);
+    // Completion stays explicit: every step can be done and the wizard
+    // still waits for Finish setup (or Skip) to write the timestamp.
+    expect(body.onboarding_complete).toBe(false);
+  });
+
+  it("stamps a legacy instance complete on first sighting", async () => {
+    // A tenant exists but the onboarding key has never been seeded, so the
+    // instance predates the wizard and must not suddenly see setup steps.
+    await api(
+      "/api/tenants",
+      jsonInit("POST", { name: "Harborview Physical Therapy" }),
+    );
+    await env.DB.prepare(
+      "DELETE FROM instance_settings WHERE key = 'onboarding_completed_at'",
+    ).run();
+
+    const body = await (await api("/api/instance/status")).json<any>();
+    expect(body.onboarding_complete).toBe(true);
+    const settings = await (await api("/api/instance/settings")).json<any>();
+    expect(settings.settings.onboarding_completed_at).not.toBe("");
+  });
+
+  it("accepts onboarding_completed_at through the settings PUT", async () => {
+    await api("/api/instance/status");
+    const response = await api(
+      "/api/instance/settings",
+      jsonInit("PUT", {
+        settings: { onboarding_completed_at: "2026-07-03T00:00:00.000Z" },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await (await api("/api/instance/status")).json<any>();
+    expect(body.onboarding_complete).toBe(true);
+  });
+});
+
 describe("upstream status", () => {
   it("reports the active snapshot and history", async () => {
     await seedUpstream(fixtureBody);
