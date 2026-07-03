@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeRuleset, type TenantDelta } from "../src/lib/merge";
+import { applyDelta, mergeRuleset, type TenantDelta } from "../src/lib/merge";
 import { validateRuleset } from "../src/lib/validate";
 import upstreamFixture from "./fixtures/upstream-snapshot.json";
 
@@ -9,6 +9,61 @@ const options = {
   versionNumber: 7,
   publishedAt: "2026-07-01T00:00:00.000Z",
 };
+
+describe("applyDelta layering (baseline beneath tenant)", () => {
+  const baseline: TenantDelta = {
+    add_exclusion_domain_patterns: ["^https://[^/]*\\.rmm-vendor\\.example(/.*)?$"],
+    add_phishing_indicators: [
+      { id: "msp_001", pattern: "evil\\.example", severity: "high", action: "block" },
+    ],
+  };
+
+  it("does not stamp version or lastUpdated", () => {
+    const applied = applyDelta(upstream, baseline);
+    expect(applied.version).toBe(upstream.version);
+    expect(applied.lastUpdated).toBe(upstream.lastUpdated);
+  });
+
+  it("layers baseline first, then the tenant delta on its output", () => {
+    const base = applyDelta(upstream, baseline);
+    const merged = mergeRuleset(
+      base,
+      { add_exclusion_domain_patterns: ["^https://[^/]*\\.harborviewpt\\.com(/.*)?$"] },
+      options,
+    );
+    const patterns = (merged.exclusion_system as any).domain_patterns as string[];
+    const upstreamCount = (upstream.exclusion_system as any).domain_patterns.length;
+    expect(patterns.length).toBe(upstreamCount + 2);
+    // Baseline appends before the tenant delta.
+    expect(patterns[upstreamCount]).toBe(
+      "^https://[^/]*\\.rmm-vendor\\.example(/.*)?$",
+    );
+    expect(patterns[upstreamCount + 1]).toBe(
+      "^https://[^/]*\\.harborviewpt\\.com(/.*)?$",
+    );
+    const ids = (merged.phishing_indicators as any[]).map((i) => i.id);
+    expect(ids).toContain("msp_001");
+  });
+
+  it("lets a tenant suppression remove a baseline-added indicator", () => {
+    const base = applyDelta(upstream, baseline);
+    const merged = mergeRuleset(base, { suppress_indicator_ids: ["msp_001"] }, options);
+    const ids = (merged.phishing_indicators as any[]).map((i) => i.id);
+    expect(ids).not.toContain("msp_001");
+  });
+
+  it("surfaces a duplicate id between baseline and tenant via the gates", () => {
+    const base = applyDelta(upstream, baseline);
+    const merged = mergeRuleset(
+      base,
+      { add_phishing_indicators: [{ id: "msp_001", severity: "low" }] },
+      options,
+    );
+    const check = validateRuleset(JSON.stringify(merged));
+    expect(check.ok).toBe(false);
+    expect(check.errors.join(" ")).toContain("duplicate indicator id: msp_001");
+  });
+});
 
 describe("mergeRuleset", () => {
   it("appends exclusion domain patterns", () => {

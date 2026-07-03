@@ -90,6 +90,10 @@ export const DEFAULT_INSTANCE_SETTINGS: Record<string, string> = {
   // directly through the settings PUT.
   default_logo_r2_key: "",
   default_logo_content_type: "",
+  // Instance-level rule delta (same shape as a tenant delta) applied beneath
+  // every tenant delta at merge time; standard MSP exclusions live here.
+  // Empty means none. Validated on write by validateDelta.
+  baseline_rule_delta: "",
 };
 
 export function nowIso(): string {

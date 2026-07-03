@@ -7,7 +7,7 @@ import {
   sha256Hex,
   type UpstreamSnapshotRow,
 } from "./db";
-import { loadSnapshotRuleset, publishTenant } from "./publish";
+import { loadSnapshotRuleset, republishAllTenants } from "./publish";
 import { validateRuleset } from "./validate";
 import { writeAudit } from "./audit";
 
@@ -217,31 +217,12 @@ export async function syncUpstream(
 
   // Re-merge and auto-publish every tenant with a published version, using
   // the delta frozen in that version (never the operator's draft).
-  const { results: tenantsToRepublish } = await env.DB.prepare(
-    "SELECT t.id AS tenant_id, v.delta_json FROM tenants t " +
-      "JOIN ruleset_versions v ON v.id = t.current_version_id",
-  ).all<{ tenant_id: string; delta_json: string }>();
-
-  let republished = 0;
-  const republishFailures: { tenantId: string; errors: string[] }[] = [];
-  for (const row of tenantsToRepublish) {
-    const result = await publishTenant(
-      env,
-      row.tenant_id,
-      row.delta_json,
-      "cron",
-      `upstream auto-publish of snapshot ${snapshotId}`,
-    );
-    if (result.ok) {
-      republished += 1;
-    } else {
-      republishFailures.push({ tenantId: row.tenant_id, errors: result.errors });
-      await writeAudit(env.DB, operator, "rules.publish_failed", row.tenant_id, {
-        snapshotId,
-        errors: result.errors,
-      });
-    }
-  }
+  const { republished, failures: republishFailures } = await republishAllTenants(
+    env,
+    "cron",
+    `upstream auto-publish of snapshot ${snapshotId}`,
+    operator,
+  );
 
   const outcome: SyncOutcome = {
     status: "updated",

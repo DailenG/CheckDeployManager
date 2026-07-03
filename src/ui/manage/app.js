@@ -324,6 +324,7 @@ async function renderTenantDetail(tenantId, tab) {
     <div class="row spread">
       <h1>${esc(tenant.name)}</h1>
       <div class="row">
+        <button id="duplicate-tenant" class="small">Duplicate</button>
         <button id="rename-tenant" class="small">Rename</button>
         <button id="delete-tenant" class="small danger">Delete</button>
       </div>
@@ -335,6 +336,23 @@ async function renderTenantDetail(tenantId, tab) {
 
   document.getElementById("copy-preview").addEventListener("click", () => {
     copyText(`${location.origin}/preview/${tenant.preview_token}.json`);
+  });
+  document.getElementById("duplicate-tenant").addEventListener("click", async () => {
+    const name = prompt(
+      "Name for the duplicate. Only the rules delta draft is copied; branding and policy inherit the tenant defaults.",
+      `${tenant.name} copy`,
+    );
+    if (!name || !name.trim()) return;
+    try {
+      const created = await api(
+        `/tenants/${tenantId}/duplicate`,
+        jsonBody("POST", { name: name.trim() }),
+      );
+      toast(`Duplicated into "${created.name}" with GUID ${created.guid}`);
+      location.hash = `#/tenants/${created.id}`;
+    } catch (error) {
+      toast(error.message, true);
+    }
   });
   document.getElementById("rename-tenant").addEventListener("click", async () => {
     const name = prompt("New tenant name:", tenant.name);
@@ -1068,6 +1086,13 @@ async function renderSettings() {
       <input type="text" id="td-b-${esc(key)}" value="${esc(db[key] || "")}"></label>`,
   ).join("");
 
+  let prettyBaseline = data.settings.baseline_rule_delta || "{}";
+  try {
+    prettyBaseline = JSON.stringify(JSON.parse(prettyBaseline), null, 2);
+  } catch {
+    /* show as stored */
+  }
+
   view.innerHTML = `
     <h1>Instance settings</h1>
     <div class="panel">
@@ -1119,6 +1144,20 @@ async function renderSettings() {
           <input type="text" id="td-p-webhook-events" value="${esc((webhook && webhook.events ? webhook.events : POLICY_FALLBACKS.genericWebhook.events).join(", "))}"></label>
       </div>
       <button id="save-defaults" class="primary">Save tenant defaults</button>
+    </div>
+    <h2>Baseline rules delta</h2>
+    <p class="muted">Applied beneath every tenant delta at merge time; standard MSP exclusions
+      such as RMM domains belong here. Same keys as a tenant delta:
+      <span class="mono">add_exclusion_domain_patterns, add_trusted_login_patterns,
+      add_phishing_indicators, suppress_indicator_ids, raw_overrides</span>.
+      A change takes effect on each tenant's next publish; use Republish all tenants
+      to roll it out immediately.</p>
+    <div class="panel">
+      <textarea id="baseline-delta" class="tall" spellcheck="false">${esc(prettyBaseline)}</textarea>
+      <div class="row" style="margin-top:10px">
+        <button id="save-baseline" class="primary">Save baseline delta</button>
+        <button id="republish-all">Republish all tenants</button>
+      </div>
     </div>`;
 
   document.getElementById("save-settings").addEventListener("click", async () => {
@@ -1219,6 +1258,50 @@ async function renderSettings() {
       toast(error.message, true);
     }
   });
+
+  document.getElementById("save-baseline").addEventListener("click", async () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(document.getElementById("baseline-delta").value);
+    } catch (error) {
+      toast(`baseline delta is not valid JSON: ${error.message}`, true);
+      return;
+    }
+    const value =
+      parsed && typeof parsed === "object" && Object.keys(parsed).length > 0
+        ? JSON.stringify(parsed)
+        : "";
+    try {
+      await api(
+        "/instance/settings",
+        jsonBody("PUT", { settings: { baseline_rule_delta: value } }),
+      );
+      toast("Baseline delta saved; it applies on each tenant's next publish");
+      route();
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
+
+  document.getElementById("republish-all").addEventListener("click", async () => {
+    if (!confirm("Republish every tenant with a published version using its current delta?")) {
+      return;
+    }
+    const button = document.getElementById("republish-all");
+    button.disabled = true;
+    button.textContent = "Republishing...";
+    try {
+      const outcome = await api("/instance/republish", { method: "POST" });
+      const failed = outcome.failures.length;
+      toast(
+        `Republished ${outcome.republished} tenants${failed > 0 ? `; ${failed} failed (see audit log)` : ""}`,
+        failed > 0,
+      );
+    } catch (error) {
+      toast(error.message, true);
+    }
+    route();
+  });
 }
 
 /* ---------- setup wizard ---------- */
@@ -1310,8 +1393,31 @@ async function renderSetup() {
      <button id="setup-save" class="primary">Save settings</button>`,
   );
 
-  const step3 = setupStep(
+  const wizardDefaults = parseDefaultsSetting(settings.tenant_defaults || "");
+  const defaultsDone = Object.keys(wizardDefaults.branding).length > 0;
+  const stepDefaults = setupStep(
     3,
+    "Standard branding defaults (optional)",
+    defaultsDone ? "done" : "todo",
+    `<p>Your standard support info, set once: every tenant inherits these
+       values until it sets its own, so fleet-wide changes stay single-edit.
+       Skip freely; the full editor (logo, policy defaults) lives on the
+       Settings page.</p>
+     <div class="grid2">
+       <label class="field"><span>Company name</span>
+         <input type="text" id="setup-td-company" value="${esc(wizardDefaults.branding.company_name || "")}"></label>
+       <label class="field"><span>Product name</span>
+         <input type="text" id="setup-td-product" value="${esc(wizardDefaults.branding.product_name || "")}"></label>
+       <label class="field"><span>Support email</span>
+         <input type="text" id="setup-td-email" value="${esc(wizardDefaults.branding.support_email || "")}"></label>
+       <label class="field"><span>Support URL</span>
+         <input type="text" id="setup-td-support" value="${esc(wizardDefaults.branding.support_url || "")}"></label>
+     </div>
+     <button id="setup-save-defaults" class="primary">Save defaults</button>`,
+  );
+
+  const step3 = setupStep(
+    4,
     "First upstream sync",
     upstreamDone ? "done" : settingsDone ? "todo" : "locked",
     `${
@@ -1347,7 +1453,7 @@ async function renderSetup() {
       <button id="setup-create-tenant" class="primary">Create and publish</button>`;
   }
   const step4 = setupStep(
-    4,
+    5,
     "Create your first tenant",
     tenantDone ? "done" : upstreamDone ? "todo" : "locked",
     step4Body,
@@ -1358,7 +1464,7 @@ async function renderSetup() {
       ? `#/tenants/${setupTenantResult.id}/artifacts`
       : "#/tenants";
   const step5 = setupStep(
-    5,
+    6,
     "Deploy and verify",
     tenantDone ? "todo" : "locked",
     `<p>Grab deployment files from the tenant's
@@ -1378,7 +1484,7 @@ async function renderSetup() {
     <p class="muted">Statuses reflect live server state; close this tab and
       come back any time. The rest of the dashboard stays usable from the top
       nav.</p>
-    ${step1}${step2}${step3}${step4}${step5}`;
+    ${step1}${step2}${stepDefaults}${step3}${step4}${step5}`;
 
   document.getElementById("setup-skip").addEventListener("click", () => {
     finishSetup("Setup skipped; the wizard will not be offered again");
@@ -1399,6 +1505,41 @@ async function renderSetup() {
           }),
         );
         toast("Settings saved");
+        route();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  }
+
+  const saveDefaults = document.getElementById("setup-save-defaults");
+  if (saveDefaults) {
+    saveDefaults.addEventListener("click", async () => {
+      // Merge into the stored value so policy defaults and branding fields
+      // this step does not cover survive untouched.
+      const merged = parseDefaultsSetting(settings.tenant_defaults || "");
+      const fields = [
+        ["company_name", "setup-td-company"],
+        ["product_name", "setup-td-product"],
+        ["support_email", "setup-td-email"],
+        ["support_url", "setup-td-support"],
+      ];
+      for (const [key, id] of fields) {
+        const value = document.getElementById(id).value.trim();
+        if (value !== "") merged.branding[key] = value;
+        else delete merged.branding[key];
+      }
+      const value =
+        Object.keys(merged.branding).length === 0 &&
+        Object.keys(merged.policy).length === 0
+          ? ""
+          : JSON.stringify(merged);
+      try {
+        await api(
+          "/instance/settings",
+          jsonBody("PUT", { settings: { tenant_defaults: value } }),
+        );
+        toast("Tenant defaults saved");
         route();
       } catch (error) {
         toast(error.message, true);

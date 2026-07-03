@@ -7,7 +7,7 @@ import {
   sha256Hex,
   type UpstreamSnapshotRow,
 } from "./db";
-import { mergeRuleset, type TenantDelta } from "./merge";
+import { applyDelta, mergeRuleset, type TenantDelta } from "./merge";
 import { validateDelta, validateRuleset } from "./validate";
 import { writeAudit } from "./audit";
 
@@ -63,7 +63,26 @@ export async function buildMergedRuleset(
   }
 
   const settings = await getInstanceSettings(env.DB);
-  const merged = mergeRuleset(upstream, delta, {
+
+  // Instance baseline delta (standard MSP exclusions) applies beneath every
+  // tenant delta. The settings PUT validates it on write; a bad stored value
+  // still fails loudly here rather than silently publishing without it.
+  let base = upstream;
+  const baselineJson = settings.baseline_rule_delta ?? "";
+  if (baselineJson !== "" && baselineJson !== "{}") {
+    const baselineCheck = validateDelta(baselineJson);
+    if (!baselineCheck.ok) {
+      return {
+        ok: false,
+        errors: baselineCheck.errors.map(
+          (error) => `baseline_rule_delta: ${error}`,
+        ),
+      };
+    }
+    base = applyDelta(upstream, baselineCheck.ruleset as TenantDelta);
+  }
+
+  const merged = mergeRuleset(base, delta, {
     suffixLabel: settings.version_suffix_label,
     versionNumber,
     publishedAt: nowIso(),
@@ -131,4 +150,40 @@ export async function publishTenant(
   });
 
   return { ok: true, versionId, versionNumber, etag };
+}
+
+export interface RepublishOutcome {
+  republished: number;
+  failures: { tenantId: string; errors: string[] }[];
+}
+
+// Re-merges and republishes every tenant with a published version, using
+// the delta frozen in that version (never the operator's draft). Shared by
+// the upstream sync auto-publish and the baseline-delta republish action.
+export async function republishAllTenants(
+  env: Env,
+  publishAs: string,
+  note: string,
+  auditOperator: string,
+): Promise<RepublishOutcome> {
+  const { results } = await env.DB.prepare(
+    "SELECT t.id AS tenant_id, v.delta_json FROM tenants t " +
+      "JOIN ruleset_versions v ON v.id = t.current_version_id",
+  ).all<{ tenant_id: string; delta_json: string }>();
+
+  let republished = 0;
+  const failures: { tenantId: string; errors: string[] }[] = [];
+  for (const row of results) {
+    const result = await publishTenant(env, row.tenant_id, row.delta_json, publishAs, note);
+    if (result.ok) {
+      republished += 1;
+    } else {
+      failures.push({ tenantId: row.tenant_id, errors: result.errors });
+      await writeAudit(env.DB, auditOperator, "rules.publish_failed", row.tenant_id, {
+        note,
+        errors: result.errors,
+      });
+    }
+  }
+  return { republished, failures };
 }

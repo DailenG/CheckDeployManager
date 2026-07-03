@@ -163,6 +163,36 @@ their policy is re-pushed -- re-import the GPO or reg file, re-sync Intune,
 or re-run the CIPP standard. The logo is the exception: it is fetched live
 from the asset URL.
 
+The setup wizard offers a small optional "Standard branding defaults" step
+(company name, product name, support email and URL) that writes the same
+setting; the full editor stays on the Settings page.
+
+### Baseline rules delta
+
+The **Baseline rules delta** panel on the Settings page holds an
+instance-level rule delta (same keys as a tenant delta) that merges beneath
+every tenant delta at publish time. Standard MSP exclusions -- RMM domains,
+your PSA, tools every client runs -- belong here instead of being pasted
+into each tenant's delta.
+
+- Order: upstream rules, then the baseline delta, then the tenant delta.
+  A tenant can suppress an indicator the baseline added; if both add the
+  same indicator id, the duplicate-id validation gate blocks the publish.
+- The baseline is validated on save with the same checks as a tenant delta.
+- **Propagation**: published versions are immutable, so a baseline change
+  reaches a tenant on its next publish. **Republish all tenants** (next to
+  the editor) re-merges and republishes every tenant with a published
+  version immediately, using the delta frozen in its current version --
+  never unpublished drafts. Failures land in the audit log per tenant.
+
+### Duplicating a tenant
+
+**Duplicate** on the tenant header creates a fresh tenant carrying only the
+source's rules delta draft (new GUID, new preview token, nothing published).
+Branding and policy intentionally do not copy: they inherit the tenant
+defaults, and copying would freeze values that should keep inheriting. Use
+it when a new client needs the same rule adjustments as an existing one.
+
 ### Updating a deployed instance
 
 The dashboard footer shows the running version and, when a newer release

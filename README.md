@@ -6,7 +6,7 @@ Multi tenant configuration service for the [Check by CyberDrain](https://docs.ch
 
 ## What it does
 
-- **Rules host.** Mirrors the upstream CyberDrain detection rules daily, layers a small per tenant delta on top (extra exclusions, trusted patterns, custom indicators, suppressions), validates everything, and serves each client an immutable published ruleset at an unguessable URL: `/rules/{guid}.json`.
+- **Rules host.** Mirrors the upstream CyberDrain detection rules daily, layers an optional instance-wide baseline delta (standard MSP exclusions, set once) and a small per tenant delta on top (extra exclusions, trusted patterns, custom indicators, suppressions), validates everything, and serves each client an immutable published ruleset at an unguessable URL: `/rules/{guid}.json`.
 - **Policy generator.** Renders ready-to-deploy managed policy artifacts per tenant: Chrome and Edge managed storage JSON, Firefox `policies.json` (fragment and full file), `.reg` files for GPO, a ready-to-run GPO creation script (`New-GPO` / `Set-GPRegistryValue`, provably in sync with the `.reg` files), the variable block for Check's Intune setup script, and the field values for CIPP's Check deployment standard.
 - **Operations dashboard.** Draft and publish with validation gates, one-click rollback, GUID rotation and revocation with hit counters, tenant branding with logo hosting, instance-level tenant defaults (set MSP-standard branding, logo, and policy once; every tenant inherits until it overrides), a webhook inbox for false positive reports with an optional relay that forwards each report to n8n, Power Automate, or any webhook receiver, upstream diff history, and an indefinite audit log. Dark mode by default.
 

@@ -78,6 +78,54 @@ tenantsRoutes.post("/", async (c) => {
   return c.json({ id: tenantId, name, guid, preview_token: previewToken }, 201);
 });
 
+// Duplicate a tenant's rules delta into a fresh tenant. Only the draft
+// delta copies: branding and policy inherit the instance tenant defaults,
+// so duplication would just freeze values that should keep inheriting.
+tenantsRoutes.post("/:id/duplicate", async (c) => {
+  const source = await requireTenant(c);
+  if (source === null) return c.json({ error: "tenant not found" }, 404);
+  const body = await readJsonBody(c);
+  const name = typeof body?.name === "string" ? body.name.trim() : "";
+  if (name.length === 0) {
+    return c.json({ error: "name is required" }, 400);
+  }
+
+  const draft = await c.env.DB.prepare(
+    "SELECT draft_json FROM tenant_rule_deltas WHERE tenant_id = ?",
+  )
+    .bind(source.id)
+    .first<{ draft_json: string }>();
+
+  const tenantId = newId();
+  const guid = newId();
+  const previewToken = newToken();
+  const now = nowIso();
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      "INSERT INTO tenants (id, name, notes, preview_token, created_at, updated_at) " +
+        "VALUES (?, ?, NULL, ?, ?, ?)",
+    ).bind(tenantId, name, previewToken, now, now),
+    c.env.DB.prepare(
+      "INSERT INTO tenant_guids (guid, tenant_id, created_at) VALUES (?, ?, ?)",
+    ).bind(guid, tenantId, now),
+    c.env.DB.prepare(
+      "INSERT INTO tenant_rule_deltas (tenant_id, draft_json, updated_at, updated_by) " +
+        "VALUES (?, ?, ?, ?)",
+    ).bind(tenantId, draft?.draft_json ?? "{}", now, c.get("operatorEmail")),
+    c.env.DB.prepare("INSERT INTO tenant_branding (tenant_id) VALUES (?)").bind(
+      tenantId,
+    ),
+    c.env.DB.prepare(
+      "INSERT INTO tenant_policy_settings (tenant_id) VALUES (?)",
+    ).bind(tenantId),
+  ]);
+  await writeAudit(c.env.DB, c.get("operatorEmail"), "tenant.duplicate", tenantId, {
+    name,
+    sourceTenantId: source.id,
+  });
+  return c.json({ id: tenantId, name, guid, preview_token: previewToken }, 201);
+});
+
 tenantsRoutes.get("/:id", async (c) => {
   const tenant = await requireTenant(c);
   if (tenant === null) return c.json({ error: "tenant not found" }, 404);

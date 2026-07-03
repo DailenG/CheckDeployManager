@@ -8,6 +8,8 @@ import {
   putInstanceSetting,
 } from "../../lib/db";
 import { writeAudit } from "../../lib/audit";
+import { republishAllTenants } from "../../lib/publish";
+import { validateDelta } from "../../lib/validate";
 import { LOGO_TYPES, MAX_LOGO_BYTES } from "./branding";
 import { validateTenantDefaults } from "./policy";
 import { readJsonBody } from "./util";
@@ -102,6 +104,10 @@ instanceRoutes.put("/settings", async (c) => {
       errors.push(`setting ${key} must be a non-negative integer string`);
     } else if (key === "tenant_defaults") {
       errors.push(...validateTenantDefaults(value));
+    } else if (key === "baseline_rule_delta" && value !== "") {
+      errors.push(
+        ...validateDelta(value).errors.map((error) => `baseline_rule_delta: ${error}`),
+      );
     }
   }
   if (errors.length > 0) return c.json({ errors }, 422);
@@ -166,6 +172,24 @@ instanceRoutes.put("/default-logo", async (c) => {
     contentType: logo.type,
   });
   return c.json({ ok: true });
+});
+
+// Fleet republish: re-merges every tenant with a published version using
+// its frozen delta. The way a baseline_rule_delta change reaches tenants
+// without waiting for their next individual publish.
+instanceRoutes.post("/republish", async (c) => {
+  const operator = c.get("operatorEmail");
+  const outcome = await republishAllTenants(
+    c.env,
+    operator,
+    "baseline republish",
+    operator,
+  );
+  await writeAudit(c.env.DB, operator, "rules.republish_all", null, {
+    republished: outcome.republished,
+    failures: outcome.failures.length,
+  });
+  return c.json(outcome);
 });
 
 instanceRoutes.delete("/default-logo", async (c) => {

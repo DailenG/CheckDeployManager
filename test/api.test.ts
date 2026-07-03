@@ -510,6 +510,153 @@ describe("tenant defaults", () => {
   });
 });
 
+describe("baseline rule delta", () => {
+  const BASELINE = JSON.stringify({
+    add_exclusion_domain_patterns: ["^https://[^/]*\\.rmm-vendor\\.example(/.*)?$"],
+    add_phishing_indicators: [
+      { id: "msp_001", pattern: "evil\\.example", severity: "high", action: "block" },
+    ],
+  });
+
+  it("validates baseline_rule_delta on the settings PUT", async () => {
+    const ok = await api(
+      "/api/instance/settings",
+      jsonInit("PUT", { settings: { baseline_rule_delta: BASELINE } }),
+    );
+    expect(ok.status).toBe(200);
+
+    const badJson = await api(
+      "/api/instance/settings",
+      jsonInit("PUT", { settings: { baseline_rule_delta: "{nope" } }),
+    );
+    expect(badJson.status).toBe(422);
+
+    const unknownKey = await api(
+      "/api/instance/settings",
+      jsonInit("PUT", {
+        settings: { baseline_rule_delta: JSON.stringify({ add_everything: [] }) },
+      }),
+    );
+    expect(unknownKey.status).toBe(422);
+    const body = await unknownKey.json<any>();
+    expect(body.errors.join(" ")).toContain("baseline_rule_delta");
+  });
+
+  it("applies beneath the tenant delta on publish and preview", async () => {
+    await seedUpstream(fixtureBody);
+    await api(
+      "/api/instance/settings",
+      jsonInit("PUT", { settings: { baseline_rule_delta: BASELINE } }),
+    );
+    const created = await createTenantViaApi();
+    await api(
+      `/api/tenants/${created.id}/rules`,
+      jsonInit("PUT", { delta: { suppress_indicator_ids: ["msp_001"] } }),
+    );
+    await api(`/api/tenants/${created.id}/publish`, { method: "POST" });
+
+    const published = await (
+      await SELF.fetch(`${BASE}/rules/${created.guid}.json`)
+    ).json<any>();
+    // Baseline exclusion present; baseline indicator suppressed by tenant.
+    expect(published.exclusion_system.domain_patterns).toContain(
+      "^https://[^/]*\\.rmm-vendor\\.example(/.*)?$",
+    );
+    expect(published.phishing_indicators.map((i: any) => i.id)).not.toContain(
+      "msp_001",
+    );
+
+    // The live preview merges the baseline too.
+    const preview = await (
+      await SELF.fetch(`${BASE}/preview/${created.preview_token}.json`)
+    ).json<any>();
+    expect(preview.exclusion_system.domain_patterns).toContain(
+      "^https://[^/]*\\.rmm-vendor\\.example(/.*)?$",
+    );
+  });
+
+  it("republish-all rolls a baseline change out to every published tenant", async () => {
+    await seedUpstream(fixtureBody);
+    const first = await createTenantViaApi("First Client");
+    const second = await createTenantViaApi("Second Client");
+    await api(`/api/tenants/${first.id}/publish`, { method: "POST" });
+    await api(`/api/tenants/${second.id}/publish`, { method: "POST" });
+
+    await api(
+      "/api/instance/settings",
+      jsonInit("PUT", { settings: { baseline_rule_delta: BASELINE } }),
+    );
+    const republish = await api("/api/instance/republish", { method: "POST" });
+    expect(republish.status).toBe(200);
+    const outcome = await republish.json<any>();
+    expect(outcome.republished).toBe(2);
+    expect(outcome.failures).toEqual([]);
+
+    for (const tenant of [first, second]) {
+      const rules = await (
+        await SELF.fetch(`${BASE}/rules/${tenant.guid}.json`)
+      ).json<any>();
+      expect(rules.exclusion_system.domain_patterns).toContain(
+        "^https://[^/]*\\.rmm-vendor\\.example(/.*)?$",
+      );
+      expect(rules.phishing_indicators.map((i: any) => i.id)).toContain("msp_001");
+    }
+  });
+});
+
+describe("tenant duplicate", () => {
+  it("copies only the rules delta draft into a fresh tenant", async () => {
+    const source = await createTenantViaApi();
+    await api(
+      `/api/tenants/${source.id}/rules`,
+      jsonInit("PUT", { delta: SAMPLE_DELTA }),
+    );
+    await api(
+      `/api/tenants/${source.id}/branding`,
+      jsonInit("PUT", { company_name: "Source Brand" }),
+    );
+    await api(
+      `/api/tenants/${source.id}/policy`,
+      jsonInit("PUT", { settings: { updateInterval: 6 } }),
+    );
+
+    const response = await api(
+      `/api/tenants/${source.id}/duplicate`,
+      jsonInit("POST", { name: "Harborview copy" }),
+    );
+    expect(response.status).toBe(201);
+    const copy = await response.json<any>();
+    expect(copy.guid).not.toBe(source.guid);
+    expect(copy.preview_token).not.toBe(source.preview_token);
+
+    // The rules draft came along.
+    const draft = await (await api(`/api/tenants/${copy.id}/rules`)).json<any>();
+    expect(JSON.parse(draft.draft.draft_json)).toEqual(SAMPLE_DELTA);
+
+    // Branding and policy start fresh so they inherit tenant defaults.
+    const branding = await (
+      await api(`/api/tenants/${copy.id}/branding`)
+    ).json<any>();
+    expect(branding.branding.company_name).toBe("");
+    const policy = await (await api(`/api/tenants/${copy.id}/policy`)).json<any>();
+    expect(policy.settings).toEqual({});
+  });
+
+  it("requires a name and an existing source tenant", async () => {
+    const source = await createTenantViaApi();
+    const unnamed = await api(
+      `/api/tenants/${source.id}/duplicate`,
+      jsonInit("POST", {}),
+    );
+    expect(unnamed.status).toBe(400);
+    const missing = await api(
+      "/api/tenants/00000000-0000-4000-8000-000000000000/duplicate",
+      jsonInit("POST", { name: "Ghost" }),
+    );
+    expect(missing.status).toBe(404);
+  });
+});
+
 describe("GUID lifecycle", () => {
   it("rotates, keeps both active, revokes, and counts revoked hits", async () => {
     await seedUpstream(fixtureBody);

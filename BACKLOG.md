@@ -66,23 +66,139 @@ Current work queue, in order. Update as items land.
       section documents the propagation caveat. Entry deleted below per
       convention. Deferred phase 2 ideas moved to future candidates.
 
+- [x] Tenant defaults phase 2: baseline rules delta (`baseline_rule_delta`
+      instance setting, same shape as a tenant delta, validated on save,
+      merged beneath every tenant delta via the new `applyDelta` split out
+      of `mergeRuleset`; Settings-page editor plus a **Republish all
+      tenants** action reusing the upstream auto-publish loop extracted as
+      `republishAllTenants`), Duplicate tenant copying only the rules delta
+      draft (branding and policy inherit), and an optional wizard step for
+      standard branding defaults. 9 new tests (layering order, tenant
+      suppression of baseline indicators, duplicate-id gate, end-to-end
+      publish/preview/republish, duplicate isolation).
+
 Queue complete.
 
-## 1. Future candidates (unscoped)
+The numbered sections below are scoped and ready to start, in priority
+order. Priority reasoning: the sparkline is the only remaining item that
+surfaces operational signal the dashboard already collects but hides
+(rollout failures show up as fetch counts going quiet), so it pays off
+daily; the lockout drill is cheap insurance against the one failure mode
+that takes the whole dashboard away; rate-limiting-as-code hardens public
+endpoints but duplicates protections Cloudflare already provides by
+default, so it goes last.
+
+## 1. Fetch metrics sparkline on the tenant list
+
+**Goal:** make fetch health visible at a glance. The dashboard already
+counts every rules fetch per tenant per day (`fetch_metrics`), but the
+tenant list shows only "last fetch" -- a tenant whose fetch volume quietly
+dropped (policy removed from an RMM, GPO unlinked, mass uninstall) looks
+healthy until it goes fully stale. A 7-day per-tenant sparkline turns that
+into a shape the eye catches.
+
+**Decision: server-side zero-filled series, inline SVG.** The API returns a
+dense array (one integer per day, oldest first) so the client stays a dumb
+renderer and the series is unit-testable where the data lives. Inline SVG
+polyline, no chart library (the dashboard is dependency-free by design).
+
+**Mechanics:**
+
+- API: extend the existing `GET /api/tenants` list handler with one grouped
+  query over `fetch_metrics` (`SUM(hits + not_modified)` per tenant per day,
+  last 7 days), zero-fill missing days server-side, and attach
+  `fetch_series: number[]` to each tenant row. Window fixed at 7 days: it
+  matches the default `metrics_retention_days`, and longer retention does
+  not widen the sparkline.
+- UI: a small `sparkline(series)` helper in `app.js` returning an inline
+  `<svg>` with a single polyline (about 90x24), rendered in the Last fetch
+  column; `title` attribute lists per-day counts for hover. All numeric
+  data, but keep `esc()` discipline anyway.
+- Not-modified hits count as fetches (a 304 is a healthy check-in).
+- Tenants with no metrics rows render a flat zero line, same as stale.
+
+**Tests:** seed `fetch_metrics` rows across several days (including gaps
+and a day with only 304s), assert the API series is dense, ordered oldest
+first, zero-filled, and sums hits plus not_modified; assert a tenant with
+no rows gets seven zeros.
+
+**Sizing:** half a day. The query and zero-fill are the substance; the SVG
+helper is small.
+
+## 2. Access lockout drill runbook section
+
+**Goal:** an operator locked out of the dashboard (broken Access policy,
+IdP misconfiguration, team-domain typo) recovers calmly from a rehearsed
+page instead of improvising against production. The architecture doc
+already names the break-glass path (threat table, "Access lockout" row);
+this item turns it into a numbered drill.
+
+**Decision: docs only.** No code changes; the break-glass path must work
+when this app is exactly what is broken, so it can only rely on Cloudflare
+surfaces.
+
+**Mechanics:** a "Access lockout drill" subsection under runbook
+troubleshooting covering:
+
+- Symptoms and blast radius: operator-facing 403s or an OTP loop on
+  `/manage` and `/api`; public endpoints (`/rules`, `/preview`, `/assets`,
+  `/hook`) keep serving throughout, so clients are unaffected -- state this
+  first, it is what makes the drill calm.
+- Recovery path: Cloudflare dashboard (independent of Access) > Zero Trust
+  > Access > Applications > edit the policy; fix or temporarily broaden the
+  email rule; verify from a private window; re-tighten.
+- Second-level lockout: if the Zero Trust dashboard itself is unreachable,
+  the account owner login and `wrangler` (API token auth) both bypass it;
+  worst case, `ACCESS_TEAM_DOMAIN`/`ACCESS_APP_AUD` can be corrected in
+  `wrangler.jsonc` and redeployed.
+- What NOT to do: never set `ENVIRONMENT=development` on a public
+  deployment to bypass Access (the wizard already warns about this).
+- Drill checklist: rehearse the path twice a year; verify the account has
+  at least two members able to edit Access policies.
+
+**Tests:** none (documentation). Verify each dashboard path name against
+the current Cloudflare UI while writing.
+
+**Sizing:** one to two hours.
+
+## 3. Rate limiting guidance as code
+
+**Goal:** the architecture doc prescribes WAF rate limits on the public
+endpoints (tenant-enumeration and webhook-abuse mitigations) but leaves
+creation to manual clicking. Ship the rules as copy-paste code so every
+deployment applies the same limits.
+
+**Decision: documented snippets, not managed infrastructure.** This repo
+deploys with zero secrets by design; a Terraform state or an API-token
+workflow would break that. Snippets live in docs and are applied by the
+operator, who owns the zone.
+
+**Mechanics:**
+
+- New `docs/waf.md` (linked from the runbook's optional-hardening step)
+  with two equivalent forms: a Terraform `cloudflare_ruleset` block
+  (`ratelimit` phase) and a raw API `curl` against the rulesets endpoint.
+- Rules: per-IP rate limit on `/rules/*` and `/assets/*` (generous; the
+  extension polls on multi-hour intervals), a tighter one on `/hook/*`
+  (webhook inbox spam), and a note that `/manage`+`/api` sit behind Access
+  and need none.
+- Document plan-tier constraints (rate limiting availability and counting
+  characteristics differ on Free vs paid zones) and how to observe rule
+  matches (Security events) before switching from log to block.
+- Verify parameter names against the current Cloudflare provider and API
+  docs at implementation time; both have churned.
+
+**Tests:** none executable in CI (the repo has no zone); include an
+"expected behavior" section (curl loop returning 429) the operator can run
+as acceptance.
+
+**Sizing:** half a day, mostly verification against current Cloudflare
+schemas.
+
+## 4. Future candidates (unscoped)
 
 - **Wiki regeneration automation.** CI cannot regenerate the GitNexus wiki
   (needs the local index and an LLM key); today the freshness nudge is a
-  soft CI warning. Revisit if GitNexus grows a headless mode.
-- **Fetch metrics sparkline** on the tenant list, from existing
-  `fetch_metrics` rows; no schema change needed.
-- **Access lockout drill doc.** A short runbook section rehearsing the
-  break-glass path (edit the Access policy from the Cloudflare dashboard).
-- **Rate limiting guidance as code.** The runbook's optional WAF rules could
-  ship as a documented Terraform or API snippet for operators who want them.
-- **Baseline rule delta** (tenant defaults phase 2): an instance-level rule
-  delta merged before each tenant delta, for standard MSP exclusions such
-  as RMM domains.
-- **Duplicate tenant for the rules delta only** (tenant defaults phase 2):
-  branding and policy now inherit, so duplication would copy just the delta.
-- **Tenant defaults wizard step.** A small "your standard support info"
-  step in the setup wizard feeding the tenant_defaults setting.
+  soft CI warning. Not scoped because the blocker is external: revisit if
+  GitNexus grows a headless/CI mode or the wiki moves to a
+  no-LLM-required generator.

@@ -39,13 +39,16 @@ function deepMerge(
   return merged;
 }
 
-export function mergeRuleset(
-  upstream: Record<string, unknown>,
+// Applies one delta without version stamping. Deltas layer by repeated
+// application: the instance baseline delta applies first, then the tenant
+// delta on its output, so tenant suppressions can remove baseline-added
+// indicators and the duplicate-id gate catches collisions between the two.
+export function applyDelta(
+  base: Record<string, unknown>,
   delta: TenantDelta,
-  options: MergeOptions,
 ): Record<string, unknown> {
-  // Deep copy so callers can reuse the upstream object across tenants.
-  let merged: Record<string, unknown> = JSON.parse(JSON.stringify(upstream));
+  // Deep copy so callers can reuse the base object across tenants.
+  let merged: Record<string, unknown> = JSON.parse(JSON.stringify(base));
 
   if (delta.add_trusted_login_patterns?.length) {
     const existing = Array.isArray(merged.trusted_login_patterns)
@@ -84,6 +87,16 @@ export function mergeRuleset(
   if (delta.raw_overrides && Object.keys(delta.raw_overrides).length > 0) {
     merged = deepMerge(merged, delta.raw_overrides);
   }
+
+  return merged;
+}
+
+export function mergeRuleset(
+  upstream: Record<string, unknown>,
+  delta: TenantDelta,
+  options: MergeOptions,
+): Record<string, unknown> {
+  const merged = applyDelta(upstream, delta);
 
   // Keep the upstream version with a tenant suffix and stamp publish time.
   const upstreamVersion =
