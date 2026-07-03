@@ -330,6 +330,186 @@ describe("policy settings", () => {
   });
 });
 
+describe("tenant defaults", () => {
+  const VALID_DEFAULTS = JSON.stringify({
+    branding: { company_name: "Fleet MSP", support_email: "help@fleet.test" },
+    policy: { updateInterval: 12 },
+  });
+
+  async function putSetting(key: string, value: string): Promise<Response> {
+    return api(
+      "/api/instance/settings",
+      jsonInit("PUT", { settings: { [key]: value } }),
+    );
+  }
+
+  it("accepts a valid tenant_defaults object and clears with empty string", async () => {
+    expect((await putSetting("tenant_defaults", VALID_DEFAULTS)).status).toBe(200);
+    expect((await putSetting("tenant_defaults", "")).status).toBe(200);
+  });
+
+  it("rejects malformed and non-inheritable tenant_defaults", async () => {
+    expect((await putSetting("tenant_defaults", "{nope")).status).toBe(422);
+    expect((await putSetting("tenant_defaults", '["array"]')).status).toBe(422);
+    expect(
+      (
+        await putSetting(
+          "tenant_defaults",
+          JSON.stringify({ branding: { tenant_name: "x" } }),
+        )
+      ).status,
+    ).toBe(422);
+    expect(
+      (
+        await putSetting(
+          "tenant_defaults",
+          JSON.stringify({ policy: { updateInterval: "12" } }),
+        )
+      ).status,
+    ).toBe(422);
+
+    const neverInherited = await putSetting(
+      "tenant_defaults",
+      JSON.stringify({ policy: { cippTenantId: "x.onmicrosoft.com" } }),
+    );
+    expect(neverInherited.status).toBe(422);
+    const body = await neverInherited.json<any>();
+    expect(body.errors.join(" ")).toContain("never inherited");
+  });
+
+  it("rejects direct writes to the default logo settings", async () => {
+    expect((await putSetting("default_logo_r2_key", "assets/x/logo.png")).status).toBe(
+      422,
+    );
+    expect((await putSetting("default_logo_content_type", "image/png")).status).toBe(
+      422,
+    );
+  });
+
+  it("exposes defaults on the branding and policy GETs and resolves them in artifacts", async () => {
+    await api(
+      "/api/instance/settings",
+      jsonInit("PUT", {
+        settings: {
+          public_base_url: BASE,
+          tenant_defaults: VALID_DEFAULTS,
+        },
+      }),
+    );
+    const created = await createTenantViaApi();
+
+    const brandingBody = await (
+      await api(`/api/tenants/${created.id}/branding`)
+    ).json<any>();
+    expect(brandingBody.defaults.company_name).toBe("Fleet MSP");
+    expect(brandingBody.default_logo).toBe(false);
+
+    const policyBody = await (await api(`/api/tenants/${created.id}/policy`)).json<any>();
+    expect(policyBody.defaults.updateInterval).toBe(12);
+
+    // A fresh tenant inherits everything.
+    let { artifacts } = await (
+      await api(`/api/tenants/${created.id}/artifacts`)
+    ).json<any>();
+    expect(artifacts.chrome_managed_storage.updateInterval).toBe(12);
+    expect(artifacts.chrome_managed_storage.customBranding.companyName).toBe(
+      "Fleet MSP",
+    );
+    expect(artifacts.chrome_managed_storage.customBranding.supportEmail).toBe(
+      "help@fleet.test",
+    );
+
+    // Tenant overrides win; untouched fields keep inheriting.
+    await api(
+      `/api/tenants/${created.id}/policy`,
+      jsonInit("PUT", { settings: { updateInterval: 6 } }),
+    );
+    await api(
+      `/api/tenants/${created.id}/branding`,
+      jsonInit("PUT", { company_name: "Client Brand" }),
+    );
+    ({ artifacts } = await (
+      await api(`/api/tenants/${created.id}/artifacts`)
+    ).json<any>());
+    expect(artifacts.chrome_managed_storage.updateInterval).toBe(6);
+    expect(artifacts.chrome_managed_storage.customBranding.companyName).toBe(
+      "Client Brand",
+    );
+    expect(artifacts.chrome_managed_storage.customBranding.supportEmail).toBe(
+      "help@fleet.test",
+    );
+  });
+
+  it("serves the instance default logo until the tenant uploads its own", async () => {
+    await api(
+      "/api/instance/settings",
+      jsonInit("PUT", { settings: { public_base_url: BASE } }),
+    );
+    const form = new FormData();
+    form.set(
+      "logo",
+      new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "logo.png", {
+        type: "image/png",
+      }),
+    );
+    const upload = await api("/api/instance/default-logo", {
+      method: "PUT",
+      body: form,
+    });
+    expect(upload.status).toBe(200);
+
+    const created = await createTenantViaApi();
+    const inherited = await SELF.fetch(`${BASE}/assets/${created.guid}/logo`);
+    expect(inherited.status).toBe(200);
+    expect(inherited.headers.get("Content-Type")).toBe("image/png");
+
+    // The artifact bundle points at the live asset URL.
+    const { artifacts } = await (
+      await api(`/api/tenants/${created.id}/artifacts`)
+    ).json<any>();
+    expect(artifacts.logo_url).toBe(`${BASE}/assets/${created.guid}/logo`);
+
+    // A tenant upload takes over the same URL.
+    const tenantForm = new FormData();
+    tenantForm.set(
+      "logo",
+      new File([new Uint8Array([255, 216, 255])], "logo.jpg", { type: "image/jpeg" }),
+    );
+    await api(`/api/tenants/${created.id}/branding`, {
+      method: "PUT",
+      body: tenantForm,
+    });
+    const own = await SELF.fetch(`${BASE}/assets/${created.guid}/logo`);
+    expect(own.headers.get("Content-Type")).toBe("image/jpeg");
+
+    // Removing the default returns tenants without a logo to 404.
+    await api("/api/instance/default-logo", { method: "DELETE" });
+    const second = await createTenantViaApi("Second Client");
+    const gone = await SELF.fetch(`${BASE}/assets/${second.guid}/logo`);
+    expect(gone.status).toBe(404);
+  });
+
+  it("rejects oversized and wrong-type default logos", async () => {
+    const bigForm = new FormData();
+    bigForm.set(
+      "logo",
+      new File([new Uint8Array(512 * 1024 + 1)], "logo.png", { type: "image/png" }),
+    );
+    expect(
+      (await api("/api/instance/default-logo", { method: "PUT", body: bigForm })).status,
+    ).toBe(413);
+
+    const gifForm = new FormData();
+    gifForm.set(
+      "logo",
+      new File([new Uint8Array([71, 73, 70])], "logo.gif", { type: "image/gif" }),
+    );
+    expect(
+      (await api("/api/instance/default-logo", { method: "PUT", body: gifForm })).status,
+    ).toBe(400);
+  });
+});
+
 describe("GUID lifecycle", () => {
   it("rotates, keeps both active, revokes, and counts revoked hits", async () => {
     await seedUpstream(fixtureBody);

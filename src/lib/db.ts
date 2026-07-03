@@ -81,6 +81,15 @@ export const DEFAULT_INSTANCE_SETTINGS: Record<string, string> = {
   // ISO timestamp once the setup wizard is finished or skipped; empty means
   // the wizard is still offered. Not listed in the Settings page UI.
   onboarding_completed_at: "",
+  // JSON object {branding: {...}, policy: {...}} every tenant inherits until
+  // it sets its own value; empty means no defaults. Edited through the
+  // Tenant defaults panel, validated on write by validateTenantDefaults.
+  tenant_defaults: "",
+  // Instance default logo served by /assets/{guid}/logo when the tenant has
+  // none. Managed only through /api/instance/default-logo, never set
+  // directly through the settings PUT.
+  default_logo_r2_key: "",
+  default_logo_content_type: "",
 };
 
 export function nowIso(): string {

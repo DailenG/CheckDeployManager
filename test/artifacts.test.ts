@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import worker from "../src/index";
 import type { Env } from "../src/types";
 import { buildArtifactBundle } from "../src/lib/artifacts";
+import { parseTenantDefaults } from "../src/lib/tenant-defaults";
 import { HARBORVIEW_ARTIFACT_INPUT } from "./harborview-sample";
 import managedStorageGolden from "./golden/managed-storage.json";
 import firefoxFragmentGolden from "./golden/firefox-fragment.json";
@@ -169,6 +170,140 @@ describe("CIPP defaults for a fresh install", () => {
       policySettings: {},
     });
     expect(cippOff.warnings).toEqual([]);
+  });
+});
+
+describe("tenant defaults resolution", () => {
+  const DEFAULTS = {
+    branding: {
+      company_name: "Fleet MSP",
+      support_email: "help@fleet.test",
+    },
+    policy: {
+      updateInterval: 12,
+      enablePageBlocking: false,
+      urlAllowlist: ["https://fleet.test/*"],
+    },
+  };
+
+  it("resolves policy precedence: tenant beats default beats fallback", () => {
+    // Tenant key absent: the instance default applies.
+    const inherited = buildArtifactBundle({
+      ...HARBORVIEW_ARTIFACT_INPUT,
+      policySettings: {},
+      tenantDefaults: DEFAULTS,
+    });
+    expect(inherited.chrome_managed_storage.updateInterval).toBe(12);
+    expect(inherited.chrome_managed_storage.enablePageBlocking).toBe(false);
+    expect(inherited.chrome_managed_storage.urlAllowlist).toEqual([
+      "https://fleet.test/*",
+    ]);
+
+    // Tenant key present: it wins over the default.
+    const overridden = buildArtifactBundle({
+      ...HARBORVIEW_ARTIFACT_INPUT,
+      policySettings: { updateInterval: 6, enablePageBlocking: true },
+      tenantDefaults: DEFAULTS,
+    });
+    expect(overridden.chrome_managed_storage.updateInterval).toBe(6);
+    expect(overridden.chrome_managed_storage.enablePageBlocking).toBe(true);
+
+    // Neither set: the hardcoded fallback applies.
+    const bare = buildArtifactBundle({
+      ...HARBORVIEW_ARTIFACT_INPUT,
+      policySettings: {},
+    });
+    expect(bare.chrome_managed_storage.updateInterval).toBe(24);
+    expect(bare.chrome_managed_storage.enablePageBlocking).toBe(true);
+  });
+
+  it("inherits branding into empty fields only", () => {
+    const resolved = buildArtifactBundle({
+      ...HARBORVIEW_ARTIFACT_INPUT,
+      branding: {
+        ...HARBORVIEW_ARTIFACT_INPUT.branding,
+        company_name: "",
+        about_url: "",
+      },
+      tenantDefaults: {
+        branding: {
+          company_name: "Fleet MSP",
+          about_url: "https://fleet.test/about",
+          product_name: "Must not win",
+        },
+        policy: {},
+      },
+    });
+    const customBranding = resolved.chrome_managed_storage.customBranding as Record<
+      string,
+      string
+    >;
+    expect(customBranding.companyName).toBe("Fleet MSP");
+    expect(customBranding.aboutUrl).toBe("https://fleet.test/about");
+    // The tenant's own non-empty value beats the default.
+    expect(customBranding.productName).toBe("Example MSP Phishing Protection");
+    // Every artifact carries the resolved values, not just managed storage.
+    expect(resolved.intune_variables).toContain('"Fleet MSP"');
+    expect(
+      resolved.cipp_fields.find((f) => f.field === "Company Name")?.value,
+    ).toBe("Fleet MSP");
+    expect(resolved.reg_chrome).toContain('"companyName"="Fleet MSP"');
+  });
+
+  it("emits the logo URL when only the instance default logo exists", () => {
+    const noLogo = {
+      ...HARBORVIEW_ARTIFACT_INPUT.branding,
+      logo_r2_key: null,
+      logo_content_type: null,
+    };
+    const without = buildArtifactBundle({
+      ...HARBORVIEW_ARTIFACT_INPUT,
+      branding: noLogo,
+    });
+    expect(without.logo_url).toBe("");
+    const withDefault = buildArtifactBundle({
+      ...HARBORVIEW_ARTIFACT_INPUT,
+      branding: noLogo,
+      hasDefaultLogo: true,
+    });
+    expect(withDefault.logo_url).toBe(
+      `https://check.example.com/assets/${HARBORVIEW_ARTIFACT_INPUT.guid}/logo`,
+    );
+  });
+
+  it("matches the golden bundle when every default is overridden by the tenant", () => {
+    // The Harborview sample sets all the fields these defaults cover, so
+    // resolution must leave the golden output byte-identical.
+    const mixed = buildArtifactBundle({
+      ...HARBORVIEW_ARTIFACT_INPUT,
+      tenantDefaults: {
+        branding: { company_name: "Must not appear" },
+        policy: { urlAllowlist: ["https://must-not-appear.test/*"] },
+      },
+    });
+    expect(mixed).toEqual(bundle);
+  });
+
+  it("strips non-inheritable keys and malformed values at parse time", () => {
+    const parsed = parseTenantDefaults(
+      JSON.stringify({
+        branding: { company_name: "ok", tenant_id: "never", logo_r2_key: "never" },
+        policy: {
+          updateInterval: 12,
+          cippTenantId: "never-inherited.onmicrosoft.com",
+          cippServerUrl: "https://never.test",
+          enableDebugLogging: true,
+        },
+      }),
+    );
+    expect(parsed.branding).toEqual({ company_name: "ok" });
+    expect(parsed.policy).toEqual({ updateInterval: 12 });
+
+    const empty = { branding: {}, policy: {} };
+    expect(parseTenantDefaults("")).toEqual(empty);
+    expect(parseTenantDefaults("not json")).toEqual(empty);
+    expect(parseTenantDefaults("[1, 2]")).toEqual(empty);
+    expect(parseTenantDefaults('"string"')).toEqual(empty);
   });
 });
 

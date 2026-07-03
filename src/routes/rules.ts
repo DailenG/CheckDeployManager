@@ -122,14 +122,32 @@ rulesRoutes.get("/assets/:guid/logo", async (c) => {
   )
     .bind(guidRow.tenant_id)
     .first<{ logo_r2_key: string | null; logo_content_type: string | null }>();
-  if (branding === null || branding.logo_r2_key === null) return bare404();
+  let logoKey = branding?.logo_r2_key ?? null;
+  let logoContentType = branding?.logo_content_type ?? null;
 
-  const object = await c.env.STORAGE.get(branding.logo_r2_key);
+  // Tenants without their own logo inherit the instance default: the
+  // per-tenant URL stays stable while the content inherits. Read the two
+  // keys directly rather than via getInstanceSettings, which seeds missing
+  // defaults; this unauthenticated route must never write.
+  if (logoKey === null) {
+    const { results } = await c.env.DB.prepare(
+      "SELECT key, value FROM instance_settings " +
+        "WHERE key IN ('default_logo_r2_key', 'default_logo_content_type')",
+    ).all<{ key: string; value: string }>();
+    const settings = Object.fromEntries(results.map((row) => [row.key, row.value]));
+    if (settings.default_logo_r2_key) {
+      logoKey = settings.default_logo_r2_key;
+      logoContentType = settings.default_logo_content_type || null;
+    }
+  }
+  if (logoKey === null) return bare404();
+
+  const object = await c.env.STORAGE.get(logoKey);
   if (object === null) return bare404();
   return new Response(object.body, {
     status: 200,
     headers: {
-      "Content-Type": branding.logo_content_type ?? "application/octet-stream",
+      "Content-Type": logoContentType ?? "application/octet-stream",
       "Cache-Control": "public, max-age=86400",
       "X-Content-Type-Options": "nosniff",
       ...CORS_HEADERS,

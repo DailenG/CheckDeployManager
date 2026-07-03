@@ -475,24 +475,48 @@ async function renderVersionsTab(container, tenantId) {
   });
 }
 
+/* Text input with an inherited hint: when the tenant value is blank and an
+   instance default exists, the default shows as the placeholder with an
+   "inherited" badge so an override is distinguishable from a default. */
+function brandingField(id, label, value, inherited) {
+  const showHint = !value && inherited;
+  return `<label class="field"><span>${esc(label)}${
+    showHint ? ' <span class="badge">inherited</span>' : ""
+  }</span><input type="text" id="${esc(id)}" value="${esc(value)}" placeholder="${esc(inherited || "")}"></label>`;
+}
+
 async function renderBrandingTab(container, tenantId, detail) {
   const data = await api(`/tenants/${tenantId}/branding`);
   const branding = data.branding;
+  const defaults = data.defaults || {};
+  const hasDefaults = Object.keys(defaults).length > 0 || data.default_logo;
   const activeGuid = (detail.guids.find((g) => g.status === "active") || {}).guid;
-  const logoHtml = branding.logo_r2_key
-    ? `<img class="logo-preview" alt="Tenant logo" src="/assets/${esc(activeGuid)}/logo?ts=${Date.now()}">`
-    : '<p class="muted">No logo uploaded. Check recommends 48x48, maximum 128x128.</p>';
+  let logoHtml;
+  if (branding.logo_r2_key) {
+    logoHtml = `<img class="logo-preview" alt="Tenant logo" src="/assets/${esc(activeGuid)}/logo?ts=${Date.now()}">`;
+  } else if (data.default_logo && activeGuid) {
+    logoHtml = `<img class="logo-preview" alt="Inherited default logo" src="/assets/${esc(activeGuid)}/logo?ts=${Date.now()}">
+      <p class="muted"><span class="badge">inherited</span> No tenant logo uploaded; the instance
+      default logo (Settings page) is served instead.</p>`;
+  } else {
+    logoHtml = '<p class="muted">No logo uploaded. Check recommends 48x48, maximum 128x128.</p>';
+  }
 
   container.innerHTML = `
     <div class="panel">
+      ${
+        hasDefaults
+          ? '<p class="muted">Blank fields inherit the tenant defaults from the Settings page.</p>'
+          : ""
+      }
       <div class="grid2">
-        <label class="field"><span>Company name</span><input type="text" id="b-company" value="${esc(branding.company_name)}"></label>
-        <label class="field"><span>Product name</span><input type="text" id="b-product" value="${esc(branding.product_name)}"></label>
-        <label class="field"><span>Support email</span><input type="text" id="b-email" value="${esc(branding.support_email)}"></label>
-        <label class="field"><span>Support URL</span><input type="text" id="b-support" value="${esc(branding.support_url)}"></label>
-        <label class="field"><span>Privacy policy URL</span><input type="text" id="b-privacy" value="${esc(branding.privacy_policy_url)}"></label>
-        <label class="field"><span>About URL</span><input type="text" id="b-about" value="${esc(branding.about_url)}"></label>
-        <label class="field"><span>Primary color</span><input type="text" id="b-color" value="${esc(branding.primary_color)}"></label>
+        ${brandingField("b-company", "Company name", branding.company_name, defaults.company_name)}
+        ${brandingField("b-product", "Product name", branding.product_name, defaults.product_name)}
+        ${brandingField("b-email", "Support email", branding.support_email, defaults.support_email)}
+        ${brandingField("b-support", "Support URL", branding.support_url, defaults.support_url)}
+        ${brandingField("b-privacy", "Privacy policy URL", branding.privacy_policy_url, defaults.privacy_policy_url)}
+        ${brandingField("b-about", "About URL", branding.about_url, defaults.about_url)}
+        ${brandingField("b-color", "Primary color", branding.primary_color, defaults.primary_color)}
         <label class="field"><span>Logo (png, jpg, or svg; 512 KB max)</span><input type="file" id="b-logo" accept="image/png,image/jpeg,image/svg+xml"></label>
       </div>
       ${logoHtml}
@@ -535,41 +559,77 @@ async function renderBrandingTab(container, tenantId, detail) {
   }
 }
 
+/* Hardcoded fallbacks mirroring resolvePolicy in src/lib/artifacts.ts. With
+   the instance tenant defaults layered on top these form the "default layer":
+   a saved value equal to its default-layer value is stored as inherited
+   (the key is omitted), so it follows future default changes. */
+const POLICY_FALLBACKS = {
+  enablePageBlocking: true,
+  showNotifications: true,
+  enableValidPageBadge: true,
+  enableDebugLogging: false,
+  validPageBadgeTimeout: 5,
+  updateInterval: 24,
+  urlAllowlist: [],
+  domainSquatting: { enabled: true, deviationThreshold: 2, Action: "block" },
+  genericWebhook: {
+    enabled: true,
+    events: ["false_positive_report", "page_blocked", "threat_detected"],
+  },
+  enableCippReporting: false,
+  cippServerUrl: "",
+  cippTenantId: "",
+};
+
 async function renderPolicyTab(container, tenantId) {
   const data = await api(`/tenants/${tenantId}/policy`);
   const s = data.settings;
-  const squat = s.domainSquatting || {};
-  const webhook = s.genericWebhook || {};
-  const check = (value, fallback) => ((value === undefined ? fallback : value) ? "checked" : "");
+  const defaults = data.defaults || {};
+  const layer = { ...POLICY_FALLBACKS, ...defaults };
+  const eff = (key) => (s[key] === undefined ? layer[key] : s[key]);
+  const inh = (key) =>
+    s[key] === undefined && defaults[key] !== undefined
+      ? ' <span class="badge">inherited</span>'
+      : "";
+  const squat = eff("domainSquatting") || {};
+  const webhook = eff("genericWebhook") || {};
+  const check = (value) => (value ? "checked" : "");
 
   container.innerHTML = `
     <div class="panel">
+      ${
+        Object.keys(defaults).length > 0
+          ? `<p class="muted">Fields marked <span class="badge">inherited</span> follow the
+            tenant defaults on the Settings page. Saving keeps a field inherited while its
+            value still matches the default; change the value to override it.</p>`
+          : ""
+      }
       <h2 style="margin-top:0">Extension behavior</h2>
-      <label class="check"><input type="checkbox" id="p-block" ${check(s.enablePageBlocking, true)}> Enable page blocking</label>
-      <label class="check"><input type="checkbox" id="p-notify" ${check(s.showNotifications, true)}> Show notifications</label>
-      <label class="check"><input type="checkbox" id="p-badge" ${check(s.enableValidPageBadge, true)}> Valid page badge</label>
-      <label class="check"><input type="checkbox" id="p-debug" ${check(s.enableDebugLogging, false)}> Debug logging</label>
+      <label class="check"><input type="checkbox" id="p-block" ${check(eff("enablePageBlocking"))}> Enable page blocking${inh("enablePageBlocking")}</label>
+      <label class="check"><input type="checkbox" id="p-notify" ${check(eff("showNotifications"))}> Show notifications${inh("showNotifications")}</label>
+      <label class="check"><input type="checkbox" id="p-badge" ${check(eff("enableValidPageBadge"))}> Valid page badge${inh("enableValidPageBadge")}</label>
+      <label class="check"><input type="checkbox" id="p-debug" ${check(eff("enableDebugLogging"))}> Debug logging</label>
       <div class="grid2">
-        <label class="field"><span>Badge timeout (seconds)</span><input type="number" id="p-badge-timeout" value="${esc(s.validPageBadgeTimeout ?? 5)}"></label>
-        <label class="field"><span>Rules update interval (hours)</span><input type="number" id="p-interval" value="${esc(s.updateInterval ?? 24)}"></label>
+        <label class="field"><span>Badge timeout (seconds)${inh("validPageBadgeTimeout")}</span><input type="number" id="p-badge-timeout" value="${esc(eff("validPageBadgeTimeout"))}"></label>
+        <label class="field"><span>Rules update interval (hours)${inh("updateInterval")}</span><input type="number" id="p-interval" value="${esc(eff("updateInterval"))}"></label>
       </div>
-      <label class="field"><span>URL allowlist (one pattern per line, e.g. https://training.knowbe4.com/*)</span>
-        <textarea id="p-allowlist">${esc((s.urlAllowlist || []).join("\n"))}</textarea></label>
+      <label class="field"><span>URL allowlist (one pattern per line, e.g. https://training.knowbe4.com/*)${inh("urlAllowlist")}</span>
+        <textarea id="p-allowlist">${esc((eff("urlAllowlist") || []).join("\n"))}</textarea></label>
 
-      <h2>Domain squatting</h2>
-      <label class="check"><input type="checkbox" id="p-squat" ${check(squat.enabled, true)}> Enable domain squatting detection</label>
+      <h2>Domain squatting${inh("domainSquatting")}</h2>
+      <label class="check"><input type="checkbox" id="p-squat" ${check(squat.enabled)}> Enable domain squatting detection</label>
       <div class="grid2">
         <label class="field"><span>Deviation threshold</span><input type="number" id="p-squat-threshold" value="${esc(squat.deviationThreshold ?? 2)}"></label>
         <label class="field"><span>Action (block or warn)</span><input type="text" id="p-squat-action" value="${esc(squat.Action ?? "block")}"></label>
       </div>
 
-      <h2>Webhook reporting (to this service)</h2>
-      <label class="check"><input type="checkbox" id="p-webhook" ${check(webhook.enabled, true)}> Send events to the tenant hook URL</label>
+      <h2>Webhook reporting (to this service)${inh("genericWebhook")}</h2>
+      <label class="check"><input type="checkbox" id="p-webhook" ${check(webhook.enabled)}> Send events to the tenant hook URL</label>
       <label class="field"><span>Events (comma separated)</span>
-        <input type="text" id="p-webhook-events" value="${esc((webhook.events || ["false_positive_report", "page_blocked", "threat_detected"]).join(", "))}"></label>
+        <input type="text" id="p-webhook-events" value="${esc((webhook.events || POLICY_FALLBACKS.genericWebhook.events).join(", "))}"></label>
 
-      <h2>CIPP reporting</h2>
-      <label class="check"><input type="checkbox" id="p-cipp" ${check(s.enableCippReporting, false)}> Enable CIPP reporting</label>
+      <h2>CIPP reporting${inh("enableCippReporting")}</h2>
+      <label class="check"><input type="checkbox" id="p-cipp" ${check(eff("enableCippReporting"))}> Enable CIPP reporting</label>
       <div class="grid2">
         <label class="field"><span>CIPP server URL (blank uses the instance default)</span><input type="text" id="p-cipp-url" value="${esc(s.cippServerUrl || "")}"></label>
         <label class="field"><span>CIPP tenant id / domain (needed to attribute events when deploying outside the CIPP standard, which fills it per tenant)</span><input type="text" id="p-cipp-tenant" value="${esc(s.cippTenantId || "")}"></label>
@@ -607,9 +667,17 @@ async function renderPolicyTab(container, tenantId) {
       cippServerUrl: container.querySelector("#p-cipp-url").value.trim(),
       cippTenantId: container.querySelector("#p-cipp-tenant").value.trim(),
     };
+    // Normalize on save: a value equal to its default-layer value stays
+    // inherited (key omitted) instead of being frozen as an override.
+    for (const key of Object.keys(settings)) {
+      if (JSON.stringify(settings[key]) === JSON.stringify(layer[key])) {
+        delete settings[key];
+      }
+    }
     try {
       await api(`/tenants/${tenantId}/policy`, jsonBody("PUT", { settings }));
       toast("Policy settings saved");
+      route();
     } catch (error) {
       toast(error.message, true);
     }
@@ -936,6 +1004,51 @@ const SETTING_LABELS = [
   ["upstream_keep_snapshots", "Upstream snapshots to keep"],
 ];
 
+/* Branding fields shared by the Tenant defaults panel; ids get a td-b- prefix. */
+const DEFAULTS_BRANDING_FIELDS = [
+  ["company_name", "Company name"],
+  ["product_name", "Product name"],
+  ["support_email", "Support email"],
+  ["support_url", "Support URL"],
+  ["privacy_policy_url", "Privacy policy URL"],
+  ["about_url", "About URL"],
+  ["primary_color", "Primary color"],
+];
+
+/* Tolerant client-side parse of the tenant_defaults setting; the server
+   validates strictly on save. */
+function parseDefaultsSetting(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return {
+        branding:
+          parsed.branding && typeof parsed.branding === "object" ? parsed.branding : {},
+        policy: parsed.policy && typeof parsed.policy === "object" ? parsed.policy : {},
+      };
+    }
+  } catch {
+    /* fall through to empty */
+  }
+  return { branding: {}, policy: {} };
+}
+
+/* Three-way select for boolean policy defaults: no default set, on, or off. */
+function triState(id, label, value) {
+  const selected = (match) => (value === match ? " selected" : "");
+  return `<label class="field"><span>${esc(label)}</span>
+    <select id="${esc(id)}">
+      <option value=""${value === undefined ? " selected" : ""}>(no default)</option>
+      <option value="true"${selected(true)}>on</option>
+      <option value="false"${selected(false)}>off</option>
+    </select></label>`;
+}
+
+function readTriState(id) {
+  const value = document.getElementById(id).value;
+  return value === "" ? undefined : value === "true";
+}
+
 async function renderSettings() {
   const data = await api("/instance/settings");
   const fields = SETTING_LABELS.map(
@@ -943,11 +1056,69 @@ async function renderSettings() {
       <input type="text" data-setting="${esc(key)}" value="${esc(data.settings[key] ?? "")}"></label>`,
   ).join("");
 
+  const defaults = parseDefaultsSetting(data.settings.tenant_defaults || "");
+  const db = defaults.branding;
+  const dp = defaults.policy;
+  const hasDefaultLogo = (data.settings.default_logo_r2_key || "") !== "";
+  const squat = dp.domainSquatting;
+  const webhook = dp.genericWebhook;
+
+  const brandingInputs = DEFAULTS_BRANDING_FIELDS.map(
+    ([key, label]) => `<label class="field"><span>${esc(label)}</span>
+      <input type="text" id="td-b-${esc(key)}" value="${esc(db[key] || "")}"></label>`,
+  ).join("");
+
   view.innerHTML = `
     <h1>Instance settings</h1>
     <div class="panel">
       ${fields}
       <button id="save-settings" class="primary">Save settings</button>
+    </div>
+    <h2>Tenant defaults</h2>
+    <p class="muted">Every tenant inherits these values until it sets its own: branding fields
+      left blank on a tenant inherit, and policy fields a tenant never overrode inherit.
+      Dashboards and artifacts update immediately; deployed browsers pick changes up when
+      policy is re-pushed (GPO re-import, Intune or CIPP re-sync). CIPP tenant ids never
+      inherit.</p>
+    <div class="panel">
+      <h2 style="margin-top:0">Branding defaults</h2>
+      <div class="grid2">${brandingInputs}</div>
+      <h2>Default logo</h2>
+      ${
+        hasDefaultLogo
+          ? `<img class="logo-preview" alt="Instance default logo" src="/api/instance/default-logo?ts=${Date.now()}">`
+          : '<p class="muted">No default logo. Tenants without their own logo serve none.</p>'
+      }
+      <div class="grid2">
+        <label class="field"><span>Default logo (png, jpg, or svg; 512 KB max)</span>
+          <input type="file" id="td-logo" accept="image/png,image/jpeg,image/svg+xml"></label>
+      </div>
+      ${hasDefaultLogo ? '<button id="td-remove-logo" class="danger small">Remove default logo</button>' : ""}
+      <h2>Policy defaults</h2>
+      <p class="muted">Leave a field at (no default) or blank to keep Check's built-in behavior.</p>
+      <div class="grid2">
+        ${triState("td-p-block", "Enable page blocking", dp.enablePageBlocking)}
+        ${triState("td-p-notify", "Show notifications", dp.showNotifications)}
+        ${triState("td-p-badge", "Valid page badge", dp.enableValidPageBadge)}
+        ${triState("td-p-cipp", "CIPP reporting", dp.enableCippReporting)}
+        <label class="field"><span>Badge timeout (seconds; blank for no default)</span>
+          <input type="number" id="td-p-badge-timeout" value="${esc(dp.validPageBadgeTimeout ?? "")}"></label>
+        <label class="field"><span>Rules update interval (hours; blank for no default)</span>
+          <input type="number" id="td-p-interval" value="${esc(dp.updateInterval ?? "")}"></label>
+      </div>
+      <label class="field"><span>URL allowlist (one pattern per line; blank for no default)</span>
+        <textarea id="td-p-allowlist">${esc(((dp.urlAllowlist || [])).join("\n"))}</textarea></label>
+      <div class="grid2">
+        ${triState("td-p-squat", "Domain squatting detection", squat ? squat.enabled === true : undefined)}
+        <label class="field"><span>Squatting deviation threshold</span>
+          <input type="number" id="td-p-squat-threshold" value="${esc(squat ? (squat.deviationThreshold ?? 2) : 2)}"></label>
+        <label class="field"><span>Squatting action (block or warn)</span>
+          <input type="text" id="td-p-squat-action" value="${esc(squat ? (squat.Action ?? "block") : "block")}"></label>
+        ${triState("td-p-webhook", "Webhook reporting to this service", webhook ? webhook.enabled === true : undefined)}
+        <label class="field"><span>Webhook events (comma separated)</span>
+          <input type="text" id="td-p-webhook-events" value="${esc((webhook && webhook.events ? webhook.events : POLICY_FALLBACKS.genericWebhook.events).join(", "))}"></label>
+      </div>
+      <button id="save-defaults" class="primary">Save tenant defaults</button>
     </div>`;
 
   document.getElementById("save-settings").addEventListener("click", async () => {
@@ -958,6 +1129,92 @@ async function renderSettings() {
     try {
       await api("/instance/settings", jsonBody("PUT", { settings }));
       toast("Settings saved");
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
+
+  const removeLogo = document.getElementById("td-remove-logo");
+  if (removeLogo) {
+    removeLogo.addEventListener("click", async () => {
+      try {
+        await api("/instance/default-logo", { method: "DELETE" });
+        toast("Default logo removed");
+        route();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  }
+
+  document.getElementById("save-defaults").addEventListener("click", async () => {
+    const branding = {};
+    for (const [key] of DEFAULTS_BRANDING_FIELDS) {
+      const value = document.getElementById(`td-b-${key}`).value.trim();
+      if (value !== "") branding[key] = value;
+    }
+
+    const policy = {};
+    const booleans = [
+      ["enablePageBlocking", "td-p-block"],
+      ["showNotifications", "td-p-notify"],
+      ["enableValidPageBadge", "td-p-badge"],
+      ["enableCippReporting", "td-p-cipp"],
+    ];
+    for (const [key, id] of booleans) {
+      const value = readTriState(id);
+      if (value !== undefined) policy[key] = value;
+    }
+    const badgeTimeout = document.getElementById("td-p-badge-timeout").value.trim();
+    if (badgeTimeout !== "") policy.validPageBadgeTimeout = Number(badgeTimeout) || 5;
+    const interval = document.getElementById("td-p-interval").value.trim();
+    if (interval !== "") policy.updateInterval = Number(interval) || 24;
+    const allowlist = document
+      .getElementById("td-p-allowlist")
+      .value.split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (allowlist.length > 0) policy.urlAllowlist = allowlist;
+    const squatEnabled = readTriState("td-p-squat");
+    if (squatEnabled !== undefined) {
+      // Key order matches the Policy tab's builder so normalize-on-save
+      // recognizes an unchanged inherited object.
+      policy.domainSquatting = {
+        enabled: squatEnabled,
+        deviationThreshold:
+          Number(document.getElementById("td-p-squat-threshold").value) || 2,
+        Action: document.getElementById("td-p-squat-action").value.trim() || "block",
+      };
+    }
+    const webhookEnabled = readTriState("td-p-webhook");
+    if (webhookEnabled !== undefined) {
+      policy.genericWebhook = {
+        enabled: webhookEnabled,
+        events: document
+          .getElementById("td-p-webhook-events")
+          .value.split(",")
+          .map((event) => event.trim())
+          .filter(Boolean),
+      };
+    }
+
+    const value =
+      Object.keys(branding).length === 0 && Object.keys(policy).length === 0
+        ? ""
+        : JSON.stringify({ branding, policy });
+    try {
+      await api(
+        "/instance/settings",
+        jsonBody("PUT", { settings: { tenant_defaults: value } }),
+      );
+      const file = document.getElementById("td-logo").files[0];
+      if (file) {
+        const form = new FormData();
+        form.set("logo", file);
+        await api("/instance/default-logo", { method: "PUT", body: form });
+      }
+      toast("Tenant defaults saved");
+      route();
     } catch (error) {
       toast(error.message, true);
     }

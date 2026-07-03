@@ -50,76 +50,25 @@ Current work queue, in order. Update as items land.
       resolvable in the GitHub web editor. Guarded to no-op on the
       upstream repo itself.
 
+- [x] Tenant defaults: instance-level branding and policy inheritance.
+      New `tenant_defaults` instance setting (JSON `{branding, policy}`,
+      strictly validated on the settings PUT) resolved at artifact
+      generation as a layer between hardcoded fallbacks and tenant values;
+      empty branding strings inherit, absent policy keys inherit,
+      `cippTenantId`/`cippServerUrl`/`enableDebugLogging` never inherit.
+      Instance default logo (PUT/DELETE `/api/instance/default-logo`)
+      served through each tenant's stable `/assets/{guid}/logo` URL.
+      Settings page gained the Tenant defaults editor panel; Branding and
+      Policy tabs show inherited hints, and the Policy tab normalizes on
+      save so values matching the default layer stay inherited. 11 new
+      tests (precedence per field class, parse/validation, logo fallback,
+      end-to-end artifacts); goldens stayed byte-identical. Runbook
+      section documents the propagation caveat. Entry deleted below per
+      convention. Deferred phase 2 ideas moved to future candidates.
+
 Queue complete.
 
-## 1. Tenant defaults: instance-level branding and policy inheritance
-
-**Goal:** stop per-tenant copy-paste of MSP-standard values and make
-fleet-wide changes single-edit. Generalizes the pattern
-`default_cipp_server_url` already proves: an instance-level default that a
-tenant value overrides, resolved at artifact generation time in
-`resolvePolicy`, never copied into tenant rows.
-
-**Decision: inheritance, not copy-on-create.** A Duplicate button or
-onboarding-time template copies values that then drift; the operator's
-stated pain (change support info or product name once, not per tenant) is
-only solved by resolution-time fallback. Artifacts are already rendered on
-demand from live rows, so a defaults change reaches every non-overridden
-tenant's next artifact with no republish.
-
-**Field classification:**
-
-- Inheritable branding: everything, including `company_name` and the logo.
-  Branding is the security entity's brand as end users see it in the
-  extension; for a white-label MSP that is the MSP's own name and logo on
-  every client (brand recognition is the point), while a client that wants
-  its own brand simply overrides. Note `tenants.name` is the internal
-  dashboard label, unrelated to branding and never inherited.
-- Logo mechanics: artifacts already emit `/assets/{guid}/logo`, so the
-  asset route falls back to a new instance-level default logo when the
-  tenant has none. Per-tenant URLs stay stable while content inherits; no
-  artifact shape change.
-- Inheritable policy: `updateInterval`, `enablePageBlocking`,
-  `showNotifications`, `enableValidPageBadge`, `validPageBadgeTimeout`,
-  `enableCippReporting`, `urlAllowlist`, `domainSquatting`,
-  `genericWebhook` events toggle.
-- Never inherited: `cippTenantId` (maps the client to its CIPP tenant).
-  `default_cipp_server_url` keeps its existing dedicated setting.
-
-**Mechanics:**
-
-- Storage: one new instance setting `tenant_defaults` holding a JSON object
-  `{branding: {...}, policy: {...}}`, validated with the same rules as the
-  per-tenant PUTs (reuse `validatePolicySettings`). Instance settings PUT
-  validates keys against `DEFAULT_INSTANCE_SETTINGS`, so the key rides the
-  existing endpoint; the wizard and Settings page need a dedicated editor
-  panel since the value is structured, not a string field.
-- Resolution: thread the defaults into `resolvePolicy` as a layer between
-  hardcoded fallbacks and tenant values (tenant key present wins, else
-  defaults key, else current hardcoded fallback). Branding: empty string in
-  the tenant row inherits the default. Policy JSON already stores only
-  explicitly-set keys, so absent-key-means-inherit needs no migration.
-- UI: Branding and Policy tabs show the inherited value as the input
-  placeholder with an "inherited" hint so operators can tell an override
-  from a default; a Tenant defaults panel lives on the Settings page.
-  Optional wizard follow-up: a small "your standard support info" step.
-- Propagation caveat for docs: dashboards and artifacts update immediately;
-  deployed browsers change only when policy is re-pushed (GPO re-import,
-  Intune or CIPP re-sync). State this plainly in the runbook.
-
-**Tests:** resolution precedence (tenant beats default beats fallback) per
-field class, empty-string branding inheritance, defaults validation errors,
-artifacts golden run with defaults set and tenant overrides mixed.
-
-**Possible phase 2 (defer):** an instance-level baseline rule delta merged
-before each tenant delta (standard MSP exclusions such as RMM domains), and
-a Duplicate-tenant convenience for the rules delta only. Both are separate
-decisions; neither blocks this item.
-
-**Sizing:** roughly a day: resolution layer and tests are contained, the
-defaults editor panel is the bulk of the UI work.
-
-## 2. Future candidates (unscoped)
+## 1. Future candidates (unscoped)
 
 - **Wiki regeneration automation.** CI cannot regenerate the GitNexus wiki
   (needs the local index and an LLM key); today the freshness nudge is a
@@ -130,3 +79,10 @@ defaults editor panel is the bulk of the UI work.
   break-glass path (edit the Access policy from the Cloudflare dashboard).
 - **Rate limiting guidance as code.** The runbook's optional WAF rules could
   ship as a documented Terraform or API snippet for operators who want them.
+- **Baseline rule delta** (tenant defaults phase 2): an instance-level rule
+  delta merged before each tenant delta, for standard MSP exclusions such
+  as RMM domains.
+- **Duplicate tenant for the rules delta only** (tenant defaults phase 2):
+  branding and policy now inherit, so duplication would copy just the delta.
+- **Tenant defaults wizard step.** A small "your standard support info"
+  step in the setup wizard feeding the tenant_defaults setting.

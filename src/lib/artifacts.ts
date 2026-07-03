@@ -5,6 +5,11 @@
 // enterprise/Setup-Windows-Chrome-and-Edge.ps1, enterprise/firefox/policies.json).
 import type { Env } from "../types";
 import { getInstanceSettings, type TenantBrandingRow } from "./db";
+import {
+  INHERITABLE_BRANDING_FIELDS,
+  parseTenantDefaults,
+  type TenantDefaults,
+} from "./tenant-defaults";
 
 export const CHROME_EXTENSION_ID = "benimdeioplgkhanklclahllklceahbe";
 export const EDGE_EXTENSION_ID = "knepjpocdagponkonnbggpcnhnaikajg";
@@ -61,9 +66,14 @@ function asNumber(value: unknown, fallback: number): number {
 }
 
 function resolvePolicy(
-  settings: Record<string, unknown>,
+  tenantSettings: Record<string, unknown>,
   defaultCippServerUrl: string,
+  policyDefaults: Record<string, unknown>,
 ): ResolvedPolicy {
+  // Instance-level defaults sit between the hardcoded fallbacks below and
+  // the tenant's own settings: a tenant key present wins outright. Tenant
+  // policy JSON stores only explicitly-set keys, so absent means inherit.
+  const settings = { ...policyDefaults, ...tenantSettings };
   const domainSquatting =
     settings.domainSquatting !== null &&
     typeof settings.domainSquatting === "object" &&
@@ -104,6 +114,23 @@ function resolvePolicy(
     cippServerUrl,
     cippTenantId: typeof settings.cippTenantId === "string" ? settings.cippTenantId : "",
   };
+}
+
+// Branding inherits per field: the empty string in a tenant row means "use
+// the instance default". Logo fields stay untouched; the asset route does
+// that fallback so per-tenant URLs stay stable while content inherits.
+function resolveBranding(
+  branding: TenantBrandingRow,
+  brandingDefaults: Record<string, string>,
+): TenantBrandingRow {
+  const resolved: TenantBrandingRow = { ...branding };
+  for (const field of INHERITABLE_BRANDING_FIELDS) {
+    const defaultValue = brandingDefaults[field];
+    if (resolved[field] === "" && typeof defaultValue === "string") {
+      resolved[field] = defaultValue;
+    }
+  }
+  return resolved;
 }
 
 function buildManagedStorage(
@@ -472,20 +499,33 @@ export interface ArtifactInput {
   defaultCippServerUrl: string;
   branding: TenantBrandingRow;
   policySettings: Record<string, unknown>;
+  // Instance-level tenant defaults; omitted means none are set.
+  tenantDefaults?: TenantDefaults;
+  // True when the instance has a default logo, so the asset URL is live even
+  // for tenants that never uploaded their own.
+  hasDefaultLogo?: boolean;
 }
 
 // Pure renderer: everything derives from the input, so golden tests and the
 // golden generation script can run it without a database.
 export function buildArtifactBundle(input: ArtifactInput): ArtifactBundle {
   const baseUrl = input.baseUrl.replace(/\/+$/, "");
-  const policy = resolvePolicy(input.policySettings, input.defaultCippServerUrl);
+  const defaults = input.tenantDefaults ?? { branding: {}, policy: {} };
+  const branding = resolveBranding(input.branding, defaults.branding);
+  const policy = resolvePolicy(
+    input.policySettings,
+    input.defaultCippServerUrl,
+    defaults.policy,
+  );
   const configUrl = `${baseUrl}/rules/${input.guid}.json`;
   const hookUrl = `${baseUrl}/hook/${input.guid}`;
   const logoUrl =
-    input.branding.logo_r2_key !== null ? `${baseUrl}/assets/${input.guid}/logo` : "";
+    input.branding.logo_r2_key !== null || input.hasDefaultLogo === true
+      ? `${baseUrl}/assets/${input.guid}/logo`
+      : "";
   const urls = { configUrl, hookUrl, logoUrl };
 
-  const managedStorage = buildManagedStorage(policy, input.branding, urls);
+  const managedStorage = buildManagedStorage(policy, branding, urls);
   const firefoxFragment = {
     policies: {
       "3rdparty": {
@@ -522,8 +562,8 @@ export function buildArtifactBundle(input: ArtifactInput): ArtifactBundle {
     reg_chrome: buildRegFile("chrome", managedStorage),
     reg_edge: buildRegFile("edge", managedStorage),
     gpo_script: buildGpoScript(managedStorage),
-    intune_variables: buildIntuneVariables(policy, input.branding, urls),
-    cipp_fields: buildCippFields(policy, input.branding, urls),
+    intune_variables: buildIntuneVariables(policy, branding, urls),
+    cipp_fields: buildCippFields(policy, branding, urls),
     warnings,
   };
 }
@@ -597,6 +637,8 @@ export async function generateArtifacts(
       defaultCippServerUrl: settings.default_cipp_server_url,
       branding,
       policySettings: JSON.parse(policyRow?.settings_json ?? "{}"),
+      tenantDefaults: parseTenantDefaults(settings.tenant_defaults ?? ""),
+      hasDefaultLogo: (settings.default_logo_r2_key ?? "") !== "",
     }),
   };
 }

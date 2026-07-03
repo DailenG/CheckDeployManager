@@ -1,11 +1,13 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../../middleware";
 import { writeAudit } from "../../lib/audit";
+import { getInstanceSettings } from "../../lib/db";
+import { parseTenantDefaults } from "../../lib/tenant-defaults";
 import { requireTenant } from "./util";
 
 export const MAX_LOGO_BYTES = 512 * 1024;
 
-const LOGO_TYPES: Record<string, string> = {
+export const LOGO_TYPES: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
   "image/svg+xml": "svg",
@@ -31,7 +33,13 @@ brandingRoutes.get("/:id/branding", async (c) => {
   )
     .bind(tenant.id)
     .first();
-  return c.json({ branding });
+  const settings = await getInstanceSettings(c.env.DB);
+  return c.json({
+    branding,
+    // Instance-level defaults, so the dashboard can mark inherited fields.
+    defaults: parseTenantDefaults(settings.tenant_defaults ?? "").branding,
+    default_logo: settings.default_logo_r2_key !== "",
+  });
 });
 
 // Accepts JSON for text fields, or multipart/form-data when a logo file is

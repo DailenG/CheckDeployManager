@@ -113,7 +113,8 @@ reference for what the wizard automates.
    - Retention: metrics days (default 7), webhook days (default 90), stale-fetch hours (default 48), snapshots to keep (default 10)
 3. Go to **Upstream** and click **Sync now**. Confirm the snapshot validates and shows as active.
 4. Create **tenant zero** for your own organization, publish, and point a test browser at its Config URL (enroll yourself the same way clients are enrolled).
-5. Create the first client tenant: branding (logo up to 512 KB, png/jpg/svg, 48x48 recommended), policy settings, publish, then copy artifacts from the Artifacts tab into your deployment tooling.
+5. Optional but recommended for fleets: fill in **Tenant defaults** on the Settings page (your standard support info, product name, logo, and policy values) so every tenant starts correct without per-tenant copy-paste. See "Tenant defaults" under routine operations.
+6. Create the first client tenant: branding (logo up to 512 KB, png/jpg/svg, 48x48 recommended), policy settings, publish, then copy artifacts from the Artifacts tab into your deployment tooling.
 
 ## 3. Routine operations
 
@@ -134,6 +135,33 @@ Tenant > Versions > Roll back to this. The pointer moves to the selected immutab
 2. Regenerate artifacts (they use the newest active GUID) and roll them out to client policies.
 3. Watch traffic move to the new GUID, then **Revoke** the old one.
 4. After revocation, the old URL returns a bare 404 and hits are counted on the GUIDs tab; a nonzero count means some endpoints still carry the old policy.
+
+### Tenant defaults (instance-level inheritance)
+
+The **Tenant defaults** panel on the Settings page holds branding and policy
+values every tenant inherits until it sets its own. Values are resolved at
+artifact generation time, never copied into tenant rows, so changing a
+default once reaches every non-overridden tenant's next artifact with no
+republish.
+
+- **Branding**: a tenant branding field left blank inherits the default; any
+  non-empty value overrides it. The default logo is served through each
+  tenant's own `/assets/{guid}/logo` URL whenever the tenant has no logo of
+  its own, so already-deployed policies pick up a new default logo without a
+  policy change.
+- **Policy**: a policy field the tenant never overrode inherits. The Policy
+  tab marks inherited fields with an "inherited" badge; saving the tab keeps
+  a field inherited while its value still matches the default, so tenants
+  follow future default changes until you deliberately change their value.
+- **Never inherited**: the CIPP tenant id (it maps a client to its CIPP
+  tenant), the CIPP server URL (use the dedicated **Default CIPP server
+  URL** setting), and debug logging.
+
+**Propagation caveat**: dashboards and generated artifacts reflect a
+defaults change immediately, but browsers already deployed only change when
+their policy is re-pushed -- re-import the GPO or reg file, re-sync Intune,
+or re-run the CIPP standard. The logo is the exception: it is fetched live
+from the asset URL.
 
 ### Updating a deployed instance
 
