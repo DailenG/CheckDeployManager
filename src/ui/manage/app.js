@@ -126,7 +126,27 @@ themeToggle.addEventListener("click", () => {
 
 /* ---------- router ---------- */
 
+/* Setup wizard state. Status is fetched once at boot and refreshed after
+   each wizard action; every step's state derives from it, never from a
+   stored step counter. The redirect fires at most once per page load so the
+   top nav stays fully usable while onboarding is incomplete. */
+let onboardingStatus = null;
+let redirectedToSetup = false;
+let setupTenantResult = null;
+
+async function refreshOnboardingStatus() {
+  try {
+    onboardingStatus = await api("/instance/status");
+  } catch {
+    onboardingStatus = null;
+  }
+  const showSetup =
+    onboardingStatus !== null && !onboardingStatus.onboarding_complete;
+  document.getElementById("nav-setup").classList.toggle("hidden", !showSetup);
+}
+
 const routes = [
+  { pattern: /^#\/setup$/, render: renderSetup, nav: "setup" },
   { pattern: /^#\/tenants$/, render: renderTenantList, nav: "tenants" },
   { pattern: /^#\/tenants\/([0-9a-f-]+)(?:\/(\w+))?$/, render: renderTenantDetail, nav: "tenants" },
   { pattern: /^#\/events$/, render: renderEvents, nav: "events" },
@@ -137,6 +157,16 @@ const routes = [
 
 async function route() {
   const hash = location.hash || "#/tenants";
+  if (
+    !redirectedToSetup &&
+    hash === "#/tenants" &&
+    onboardingStatus !== null &&
+    !onboardingStatus.onboarding_complete
+  ) {
+    redirectedToSetup = true;
+    location.hash = "#/setup";
+    if (location.hash === "#/setup") return;
+  }
   for (const entry of routes) {
     const match = hash.match(entry.pattern);
     if (match) {
@@ -156,7 +186,7 @@ async function route() {
 }
 
 window.addEventListener("hashchange", route);
-route();
+refreshOnboardingStatus().then(route);
 
 /* ---------- tenant list ---------- */
 
@@ -860,6 +890,239 @@ async function renderSettings() {
     } catch (error) {
       toast(error.message, true);
     }
+  });
+}
+
+/* ---------- setup wizard ---------- */
+
+function setupStep(number, title, state, body) {
+  const badge =
+    state === "done"
+      ? '<span class="badge good">done</span>'
+      : state === "locked"
+        ? '<span class="badge">waiting</span>'
+        : '<span class="badge accent">to do</span>';
+  return `<div class="panel">
+    <div class="row spread"><h2>${number}. ${esc(title)}</h2>${badge}</div>
+    ${state === "locked" ? '<p class="muted">Complete the previous step first.</p>' : body}
+  </div>`;
+}
+
+async function finishSetup(message) {
+  try {
+    await api(
+      "/instance/settings",
+      jsonBody("PUT", {
+        settings: { onboarding_completed_at: new Date().toISOString() },
+      }),
+    );
+    toast(message);
+    await refreshOnboardingStatus();
+    location.hash = "#/tenants";
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function renderSetup() {
+  await refreshOnboardingStatus();
+  if (onboardingStatus === null) {
+    view.innerHTML =
+      '<div class="panel"><strong>Error:</strong> could not load instance status.</div>';
+    return;
+  }
+  const status = onboardingStatus;
+  const checks = status.checks;
+  const settings = (await api("/instance/settings")).settings;
+
+  if (status.onboarding_complete) {
+    view.innerHTML = `
+      <h1>Setup</h1>
+      <div class="panel"><p>Setup is complete. Everything the wizard covered
+      lives under Tenants, Upstream, and Settings.</p></div>`;
+    return;
+  }
+
+  const settingsDone = checks.settings_configured;
+  const upstreamDone = checks.upstream_synced;
+  const tenantDone = checks.tenant_count > 0 && checks.any_published;
+  const devOnRemote =
+    status.environment === "development" &&
+    !["localhost", "127.0.0.1"].includes(location.hostname);
+
+  const step1 = setupStep(
+    1,
+    "Environment check",
+    "done",
+    `<p>You are signed in as <strong>${esc(status.operator_email)}</strong>
+     with <span class="mono">ENVIRONMENT=${esc(status.environment)}</span>.
+     Reaching this page proves the identity provider, the Access application,
+     and in-Worker JWT validation are all working.</p>
+     ${
+       devOnRemote
+         ? `<p class="badge bad">ENVIRONMENT is development on a non-localhost
+            origin. The Access bypass is active; set ENVIRONMENT=production
+            before real use.</p>`
+         : ""
+     }`,
+  );
+
+  const step2 = setupStep(
+    2,
+    "Instance settings",
+    settingsDone ? "done" : "todo",
+    `<p>Only what artifact generation needs. Retention and the upstream
+     source URL stay on the Settings page.</p>
+     <label class="field"><span>Public base URL (used in every generated artifact)</span>
+       <input type="text" id="setup-base-url" value="${esc(settings.public_base_url || location.origin)}"></label>
+     <label class="field"><span>Version suffix label</span>
+       <input type="text" id="setup-suffix" value="${esc(settings.version_suffix_label ?? "")}"></label>
+     <label class="field"><span>Default CIPP server URL (optional; blank disables CIPP)</span>
+       <input type="text" id="setup-cipp" value="${esc(settings.default_cipp_server_url ?? "")}"></label>
+     <button id="setup-save" class="primary">Save settings</button>`,
+  );
+
+  const step3 = setupStep(
+    3,
+    "First upstream sync",
+    upstreamDone ? "done" : settingsDone ? "todo" : "locked",
+    `${
+      upstreamDone
+        ? `<p>Active snapshot: version
+           <strong>${esc(checks.upstream_version || "unknown")}</strong>,
+           fetched ${esc(fmtTime(checks.upstream_fetched_at))}.</p>`
+        : `<p>Pulls the current CyberDrain detection rules. The Worker needs
+           outbound internet for this call.</p>`
+    }
+     <button id="setup-sync" class="${upstreamDone ? "" : "primary"}">
+       ${upstreamDone ? "Sync again" : "Sync now"}</button>`,
+  );
+
+  let step4Body;
+  if (tenantDone) {
+    if (setupTenantResult !== null) {
+      const configUrl = `${(settings.public_base_url || "").replace(/\/+$/, "")}/rules/${setupTenantResult.guid}.json`;
+      artifactStore.set("setup-config-url", configUrl);
+      step4Body = `<p>Tenant created and published. Its Config URL:</p>
+        <p class="mono">${esc(configUrl)}
+        <button class="small" data-copy-key="setup-config-url">Copy</button></p>`;
+    } else {
+      step4Body = `<p>A tenant with a published ruleset already exists. Config
+        URLs live on each tenant's Artifacts tab.</p>`;
+    }
+  } else {
+    step4Body = `<p>Creates your first tenant and publishes its default
+      ruleset (the upstream rules with an empty delta). Everything here can
+      be changed later.</p>
+      <label class="field"><span>Tenant name</span>
+        <input type="text" id="setup-tenant-name" value="My organization"></label>
+      <button id="setup-create-tenant" class="primary">Create and publish</button>`;
+  }
+  const step4 = setupStep(
+    4,
+    "Create your first tenant",
+    tenantDone ? "done" : upstreamDone ? "todo" : "locked",
+    step4Body,
+  );
+
+  const artifactsLink =
+    setupTenantResult !== null
+      ? `#/tenants/${setupTenantResult.id}/artifacts`
+      : "#/tenants";
+  const step5 = setupStep(
+    5,
+    "Deploy and verify",
+    tenantDone ? "todo" : "locked",
+    `<p>Grab deployment files from the tenant's
+       <a href="${esc(artifactsLink)}">Artifacts tab</a>: managed storage
+       JSON, reg files for GPO, Firefox policies, Intune variables, and CIPP
+       fields.</p>
+     <p>To verify end to end, point a test browser with the extension at the
+       Config URL and watch the Last fetch column on the tenant list.</p>
+     <button id="setup-finish" class="primary">Finish setup</button>`,
+  );
+
+  view.innerHTML = `
+    <div class="row spread">
+      <h1>Setup</h1>
+      <button id="setup-skip" class="ghost">Skip for now</button>
+    </div>
+    <p class="muted">Statuses reflect live server state; close this tab and
+      come back any time. The rest of the dashboard stays usable from the top
+      nav.</p>
+    ${step1}${step2}${step3}${step4}${step5}`;
+
+  document.getElementById("setup-skip").addEventListener("click", () => {
+    finishSetup("Setup skipped; the wizard will not be offered again");
+  });
+
+  const save = document.getElementById("setup-save");
+  if (save) {
+    save.addEventListener("click", async () => {
+      try {
+        await api(
+          "/instance/settings",
+          jsonBody("PUT", {
+            settings: {
+              public_base_url: document.getElementById("setup-base-url").value.trim(),
+              version_suffix_label: document.getElementById("setup-suffix").value.trim(),
+              default_cipp_server_url: document.getElementById("setup-cipp").value.trim(),
+            },
+          }),
+        );
+        toast("Settings saved");
+        route();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  }
+
+  const sync = document.getElementById("setup-sync");
+  if (sync) {
+    sync.addEventListener("click", async () => {
+      sync.disabled = true;
+      sync.textContent = "Syncing...";
+      try {
+        const outcome = await api("/upstream", { method: "POST" });
+        if (outcome.status === "updated") {
+          toast(`Updated: ${outcome.diffSummary}`);
+        } else if (outcome.status === "unchanged") {
+          toast("Upstream unchanged");
+        } else {
+          toast(`Sync ${outcome.status}: ${(outcome.errors || []).join("; ")}`, true);
+        }
+      } catch (error) {
+        toast(error.message, true);
+      }
+      route();
+    });
+  }
+
+  const create = document.getElementById("setup-create-tenant");
+  if (create) {
+    create.addEventListener("click", async () => {
+      const name = document.getElementById("setup-tenant-name").value.trim();
+      if (!name) {
+        toast("Tenant name is required", true);
+        return;
+      }
+      create.disabled = true;
+      create.textContent = "Creating...";
+      try {
+        const created = await api("/tenants", jsonBody("POST", { name }));
+        await api(`/tenants/${created.id}/publish`, { method: "POST" });
+        setupTenantResult = { id: created.id, guid: created.guid };
+        toast("Tenant created and ruleset published");
+      } catch (error) {
+        toast(error.message, true);
+      }
+      route();
+    });
+  }
+
+  document.getElementById("setup-finish")?.addEventListener("click", () => {
+    finishSetup("Setup complete");
   });
 }
 

@@ -196,6 +196,7 @@ pre.code {
   z-index: 100;
 }
 .toast.hidden { display: none; }
+.hidden { display: none; }
 .toast.error { border-color: var(--bad); }
 
 .logo-preview {

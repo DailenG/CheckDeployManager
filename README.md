@@ -21,7 +21,9 @@ All screenshots show a local instance seeded with the project's fictional sample
 | ![Per-tenant deployment artifacts: managed storage JSON, reg files, Intune variables, CIPP fields](docs/screenshots/tenant-artifacts.png) | ![Rules draft editor with validation and one-click publish](docs/screenshots/tenant-rules.png) |
 | ![Upstream sync status and snapshot history](docs/screenshots/upstream.png) | ![Audit log with per-action detail](docs/screenshots/audit.png) |
 
-![Tenant branding for white-label deployments](docs/screenshots/tenant-branding.png)
+| | |
+|---|---|
+| ![First-login setup wizard with live step state](docs/screenshots/setup-wizard.png) | ![Tenant branding for white-label deployments](docs/screenshots/tenant-branding.png) |
 
 ## Architecture
 
@@ -82,6 +84,8 @@ If the deployed URL answers `Hello world` or shows "No URLs enabled", the button
 2. **Create the Access application.** Zero Trust > Access controls > Applications > Add > Self-hosted. Add destinations for `manage*` and `api*` on each hostname (destination type Workers for the `workers.dev` hostname, Public DNS for a custom one); never a blank path, which would put the public rules endpoints behind Access and break the extension. Policy: Allow, Emails ending in `@your-domain`. The AUD tag lives on the saved app's Additional Settings tab.
 3. **Set Worker variables.** In the Worker's Settings > Variables, set `ACCESS_TEAM_DOMAIN` to `<your-team>.cloudflareaccess.com` and `ACCESS_APP_AUD` to the AUD tag from step 2, both as plain Text. Until both are set, the Worker rejects every management request.
 4. **Attach your custom domain** (recommended before your first login: Access sets cookies by bouncing through every app hostname, so a not-yet-serving hostname in the app breaks logins). Worker > Settings > Domains and Routes > Custom domain; DNS and TLS are automatic.
+On your first login the dashboard opens a **setup wizard** that walks steps 5 through 7 in-app (instance settings, first upstream sync, tenant zero) and verifies each against live server state. The list below stays as the manual reference; the wizard can be skipped and never traps you.
+
 5. **First-run configuration.** Open `https://<your-hostname>/manage`, authenticate, and set instance settings: public base URL, default CIPP server URL (if any), retention values, and the stale-fetch threshold.
 6. **Trigger the first upstream sync** from the Upstream page (or wait for the daily cron) and confirm the snapshot validates.
 7. **Create tenant zero** (your own organization), publish, and point a test browser's Config URL at it.

@@ -94,6 +94,17 @@ Once the custom domain serves, two follow-ups:
 
 ## 2. First-run configuration
 
+On a fresh instance the dashboard redirects your first visit to a **setup
+wizard** (`#/setup`) covering steps 2 through 4 below: instance settings,
+the first upstream sync, and tenant zero with a published ruleset. Each
+step's badge derives from live server state, so the wizard is resumable
+(close the tab, come back, nothing is lost) and safe with several operators
+working at once. **Skip for now** dismisses it permanently, as does
+finishing it; either writes the `onboarding_completed_at` instance setting.
+The top navigation stays fully usable throughout, and instances that
+predate the wizard never see it. The manual steps below remain the
+reference for what the wizard automates.
+
 1. Open `https://<your-hostname>/manage` and authenticate via OTP.
 2. Go to **Settings** (in the dashboard's own top navigation, not the Cloudflare dashboard) and configure:
    - **Public base URL**: `https://<your-hostname>` with the scheme and no trailing slash (used in every rules URL, hook URL, and artifact; set it to the permanent custom hostname before generating anything)
