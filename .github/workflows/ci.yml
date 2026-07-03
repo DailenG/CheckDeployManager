@@ -16,6 +16,15 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+
+      # worker-configuration.d.ts is generated; fail if the committed file
+      # drifts from wrangler.jsonc, .dev.vars.example, or the locked wrangler
+      # version. Regenerate with: npx wrangler types --strict-vars=false
+      - name: Generated types freshness
+        run: |
+          cp .dev.vars.example .dev.vars
+          npx wrangler types --strict-vars=false --check
+
       - run: npm run typecheck
       - run: npm test
 
@@ -29,10 +38,17 @@ jobs:
 
       # CONTRIBUTING rule 3: no em dashes anywhere. The character is built
       # from bytes so this workflow file stays clean itself.
+      # Generated files that carry upstream prose are exempt: the wrangler
+      # types output and the GitNexus agent docs and skills.
       - name: No em dashes
         run: |
           EMDASH="$(printf '\xe2\x80\x94')"
-          if git ls-files -z | xargs -0 grep -rlI "$EMDASH" 2>/dev/null; then
+          if git ls-files -z -- . \
+            ':(exclude)worker-configuration.d.ts' \
+            ':(exclude)CLAUDE.md' \
+            ':(exclude)AGENTS.md' \
+            ':(exclude).claude/skills/gitnexus/**' \
+            | xargs -0 grep -rlI "$EMDASH" 2>/dev/null; then
             echo "::error::Em dash found in the files above. CONTRIBUTING rule 3: use hyphens, commas, or colons."
             exit 1
           fi
@@ -41,7 +57,7 @@ jobs:
       # Harborview GUID and the all-zeros test UUID are allowed.
       - name: No unexpected UUIDs
         run: |
-          FOUND="$(git ls-files -z | xargs -0 grep -rhoIiE '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}' 2>/dev/null | sort -u \
+          FOUND="$(git ls-files -z -- . ':(exclude)worker-configuration.d.ts' | xargs -0 grep -rhoIiE '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}' 2>/dev/null | sort -u \
             | grep -viE '^(f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34|00000000-0000-4000-8000-000000000000)$' || true)"
           if [ -n "$FOUND" ]; then
             echo "$FOUND"

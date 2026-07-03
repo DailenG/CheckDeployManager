@@ -124,49 +124,7 @@ tests, wizard page, redirect, docs. Run GitNexus impact analysis on `route()`,
 `getInstanceSettings`, and the API index router before editing them; changes
 are additive so expected risk is low, but `route()` fronts every view.
 
-## 2. Migrate from @cloudflare/workers-types to generated wrangler types
-
-**Goal:** drop the `@cloudflare/workers-types` dev dependency and use
-`wrangler types` to generate `worker-configuration.d.ts`, per current
-Cloudflare guidance (the package remains recommended only for libraries and
-shared packages, not application Workers).
-
-**Why:**
-
-- Fixes a real staleness problem: `tsconfig.json` pins the
-  `@cloudflare/workers-types/2023-07-01` entrypoint while `wrangler.jsonc`
-  declares `compatibility_date: 2026-06-01`. Generated types match the
-  configured compatibility date exactly.
-- Permanently removes the Dependabot conflict class where a workers-types
-  major (v5 shipped 2026-07-03) collides with wrangler's `^4` peer range.
-  Note: a `@dependabot ignore` for the workers-types v5 major is active on
-  the repo; if this migration is abandoned, unignore it once wrangler widens
-  its peer range.
-- Blast radius is small: nothing in `src/` or `test/` imports the package;
-  the only reference is the tsconfig `types` entry.
-
-**Steps:**
-
-1. Run `npx wrangler types` and commit the generated
-   `worker-configuration.d.ts`.
-2. Reconcile `Env`: `src/types.ts` hand-defines it, including `ENVIRONMENT`
-   and `DEV_OPERATOR_EMAIL`, which come from `.dev.vars` rather than
-   `wrangler.jsonc` vars, and the generated file also declares `Env`. Either
-   adopt the generated interface (preferred if it captures the dev vars,
-   which `wrangler types` reads from `.dev.vars`) or configure generation to
-   avoid the clash. Delete or slim `src/types.ts` accordingly.
-3. Update `tsconfig.json`: replace the `types` entry with the generated file.
-4. Verify the vitest-pool-workers test typings still resolve
-   (`cloudflare:test` module, `ProvidedEnv`).
-5. `npm uninstall @cloudflare/workers-types`.
-6. CI freshness check: run `npx wrangler types` in the test job and fail if
-   the committed file drifts from the regenerated one.
-7. Document the regeneration step in CONTRIBUTING (run `wrangler types`
-   after any `wrangler.jsonc` or `.dev.vars.example` change).
-
-**Sizing:** about an hour including test verification.
-
-## 3. Future candidates (unscoped)
+## 2. Future candidates (unscoped)
 
 - **Wiki regeneration automation.** CI cannot regenerate the GitNexus wiki
   (needs the local index and an LLM key); today the freshness nudge is a

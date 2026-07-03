@@ -19,13 +19,28 @@ npm test
 
 The stack is fixed: TypeScript on Workers, Hono for routing, D1 and R2 for storage, a dependency-free vanilla JS dashboard with no build step, and Vitest with `@cloudflare/vitest-pool-workers`. Please do not introduce frontend frameworks, KV, or additional runtime dependencies without discussion.
 
+### Generated types
+
+`worker-configuration.d.ts` is generated, never hand-edited. It carries both
+the `Env` bindings interface and the Workers runtime types, replacing the
+`@cloudflare/workers-types` package. Regenerate it after any change to
+`wrangler.jsonc`, `.dev.vars.example`, or the locked `wrangler` version:
+
+```
+npx wrangler types --strict-vars=false
+```
+
+CI copies `.dev.vars.example` to `.dev.vars` and runs the same command with
+`--check`, so a stale committed file fails the build. Keep `.dev.vars.example`
+current when dev vars change; your local `.dev.vars` must use the same keys.
+
 ## Repository rules (enforced in review and CI)
 
 CI (`.github/workflows/ci.yml`) runs `npm run typecheck` and `npm test`, and greps every tracked file for em dashes, unexpected UUID literals, and a tracked `.dev.vars`. Rules that grep cannot catch (real client names, fabricated schema fields) remain review responsibilities.
 
 1. **No secrets, ever.** No tokens, API keys, credentials, or `.dev.vars` contents. The design requires zero Worker secrets; keep it that way.
 2. **No real client data.** No real client names, real tenant GUIDs, real hostnames of managed organizations, or captured webhook payloads. All fixtures and samples use the fictional tenant from the design: Harborview Physical Therapy, GUID `f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34`.
-3. **No em dashes** anywhere: code, comments, strings, docs, commit messages, or generated artifacts. Use hyphens, commas, colons, or restructure the sentence.
+3. **No em dashes** anywhere: code, comments, strings, docs, commit messages, or generated artifacts. Use hyphens, commas, colons, or restructure the sentence. Exempt: generated files that carry upstream prose, currently `worker-configuration.d.ts` (MDN comments in runtime types) and the GitNexus outputs (`CLAUDE.md`, `AGENTS.md`, `.claude/skills/gitnexus/`).
 4. **PowerShell text rules.** Any PowerShell, including PowerShell emitted as text by the artifact generator, uses full descriptive variable and function names, 7-bit ASCII only, and never uses `&&` or `||`; sequence with separate statements or semicolons.
 5. **Do not fabricate Check schema fields or Cloudflare platform behavior.** If a fact is not in `docs/architecture.md`, verify it against docs.check.tech, the CyberDrain/Check repository, or Cloudflare documentation before relying on it.
 6. **The two delivery paths stay separate.** Detection rules are URL fetched by the extension; branding and enforcement are pushed via managed storage policy. Do not collapse them in code or UI.

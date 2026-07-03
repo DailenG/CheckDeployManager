@@ -1,21 +1,10 @@
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 
-// The test runner's ProvidedEnv extends the global Cloudflare.Env, so the
-// bindings are declared there. TEST_MIGRATIONS is injected by vitest.config.
+// Worker bindings come from the generated worker-configuration.d.ts
+// (Cloudflare.Env, which types the test runner's `env` import).
+// TEST_MIGRATIONS is test-only and typed in apply-migrations.ts, its single
+// point of use, so the Worker Env does not carry it.
 declare module "*?raw" {
   const content: string;
   export default content;
-}
-
-declare namespace Cloudflare {
-  interface Env {
-    DB: D1Database;
-    STORAGE: R2Bucket;
-    ASSETS: Fetcher;
-    ACCESS_TEAM_DOMAIN: string;
-    ACCESS_APP_AUD: string;
-    ENVIRONMENT: string;
-    DEV_OPERATOR_EMAIL?: string;
-    TEST_MIGRATIONS: D1Migration[];
-  }
 }
