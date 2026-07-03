@@ -1,5 +1,5 @@
 <!-- GENERATED FILE, do not edit by hand.
-     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit 3fe8c14.
+     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit 8784ca7.
      Regenerate: node .gitnexus/run.cjs wiki, then: npm run docs:wiki -->
 
 # Operator API Module
