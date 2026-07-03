@@ -1,5 +1,5 @@
 <!-- GENERATED FILE, do not edit by hand.
-     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit 43ef23d.
+     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit 921327d.
      Regenerate: node .gitnexus/run.cjs wiki, then: npm run docs:wiki -->
 
 # Data Model & Persistence
