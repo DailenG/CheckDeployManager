@@ -6,3 +6,6 @@ dist/
 
 # Local GitNexus code-intelligence index (docs/wiki is the committed mirror)
 .gitnexus/
+
+# Machine-local Claude Code permission grants (skills and docs are committed)
+.claude/settings.local.json
