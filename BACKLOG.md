@@ -43,8 +43,14 @@ Current work queue, in order. Update as items land.
       tab section links the upstream ADMX/ADML pinned at Check v1.1.0.
       Entry deleted below per convention.
 
-Queue complete. Next: cut v0.3.0 bundling the webhook relay, CIPP
-attribution warning, version footer, and GPO deployment artifacts.
+- [x] v0.3.0 release (GPO artifacts, webhook relay, CIPP warning, footer)
+- [x] Sync upstream workflow: one-click updater shipped in every
+      deploy-button copy (Actions tab). Clean merges push and redeploy;
+      conflicts open an upstream-sync PR with the conflicted files listed,
+      resolvable in the GitHub web editor. Guarded to no-op on the
+      upstream repo itself.
+
+Queue complete.
 
 ## 1. Tenant defaults: instance-level branding and policy inheritance
 

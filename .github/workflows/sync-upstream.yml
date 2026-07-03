@@ -1,0 +1,91 @@
+name: Sync upstream
+
+# One-click updater for deployed copies of CheckDeployManager. The deploy
+# button clones this repo into the operator's account, so this workflow
+# ships with every copy. Run it from the Actions tab:
+#
+#   clean merge    -> pushed directly; Workers Builds redeploys with
+#                     npm run deploy, which applies any new D1 migrations
+#   already current -> reports up-to-date and stops
+#   conflicts      -> opens a pull request from an upstream-sync branch,
+#                     listing the conflicted files; resolve in the GitHub
+#                     web editor or locally, then merge
+#
+# Note: pushes made with the workflow token do not trigger this copy's own
+# GitHub Actions CI, but the Cloudflare Workers Builds app still receives
+# the push and deploys.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  UPSTREAM_URL: https://github.com/DailenG/CheckDeployManager.git
+
+jobs:
+  sync:
+    # No-op on the upstream repository itself.
+    if: github.repository != 'DailenG/CheckDeployManager'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Merge upstream main
+        id: merge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch upstream main
+          BEFORE="$(git rev-parse HEAD)"
+          if git merge --no-edit upstream/main; then
+            if [ "$(git rev-parse HEAD)" = "$BEFORE" ]; then
+              echo "result=up-to-date" >> "$GITHUB_OUTPUT"
+            else
+              git push origin HEAD
+              echo "result=merged" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            git diff --name-only --diff-filter=U > /tmp/conflicted-files.txt
+            git merge --abort
+            echo "result=conflict" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open a conflict resolution pull request
+        if: steps.merge.outputs.result == 'conflict'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git push --force origin upstream/main:refs/heads/upstream-sync
+          {
+            echo "Merging upstream produced conflicts in these files:"
+            echo ""
+            sed 's/^/- /' /tmp/conflicted-files.txt
+            echo ""
+            echo "Resolve them here (Resolve conflicts button) or locally, then merge."
+            echo "Rule of thumb: keep your own values in wrangler.jsonc; take the"
+            echo "upstream side elsewhere unless you customized that file on purpose."
+            echo ""
+            echo "Release notes: https://github.com/DailenG/CheckDeployManager/releases"
+          } > /tmp/pr-body.txt
+          if gh pr view upstream-sync --json url --jq '.url' 2>/dev/null; then
+            echo "Existing sync pull request updated with the new upstream head."
+          else
+            gh pr create \
+              --base "$GITHUB_REF_NAME" \
+              --head upstream-sync \
+              --title "Sync upstream: conflicts to resolve" \
+              --body-file /tmp/pr-body.txt
+          fi
+
+      - name: Report
+        run: |
+          case "${{ steps.merge.outputs.result }}" in
+            up-to-date) echo "Already up to date with upstream." >> "$GITHUB_STEP_SUMMARY" ;;
+            merged) echo "Upstream merged cleanly and pushed. Workers Builds will redeploy." >> "$GITHUB_STEP_SUMMARY" ;;
+            conflict) echo "Conflicts found. See the upstream-sync pull request." >> "$GITHUB_STEP_SUMMARY" ;;
+          esac

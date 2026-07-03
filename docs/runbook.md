@@ -144,9 +144,18 @@ for this).
 
 How you update depends on how you deployed:
 
-- **Deploy button.** The button created a standalone copy of this repo in
-  your GitHub or GitLab account with Workers Builds attached, so updates
-  flow through that copy. From a clone of it, pull this repo and push:
+- **Deploy button, one click (recommended).** Your copy of the repo ships
+  with a **Sync upstream** workflow. In your copy on GitHub: Actions >
+  Sync upstream > Run workflow. A clean merge is pushed immediately and
+  Workers Builds redeploys (`npm run deploy` applies any new D1
+  migrations). If the merge conflicts, the workflow opens a pull request
+  named `upstream-sync` listing the conflicted files; resolve them with
+  the Resolve conflicts button in the GitHub web editor (or locally) and
+  merge. Nothing deploys until the conflict is resolved. Note: the
+  workflow's own push does not re-trigger your copy's GitHub Actions CI,
+  but Workers Builds still receives it and deploys.
+
+- **Deploy button, manually.** Same result from a clone of your copy:
 
   ```
   git remote add upstream https://github.com/DailenG/CheckDeployManager.git
@@ -156,10 +165,13 @@ How you update depends on how you deployed:
   ```
 
   (`remote add` only the first time.) The push triggers Workers Builds,
-  which runs the configured deploy command; `npm run deploy` applies any
-  new D1 migrations before deploying the Worker.
+  which runs the configured deploy command.
 
 - **Local clone with wrangler.** `git pull`, then `npm run deploy`.
+
+To keep merges conflict-free, confine your customizations to
+`wrangler.jsonc` (your Access values and provisioned ids) where possible;
+everything you have not touched merges cleanly.
 
 Notes for either path:
 

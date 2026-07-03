@@ -94,7 +94,7 @@ On your first login the dashboard opens a **setup wizard** that walks steps 5 th
 
 The full runbook with verification steps lives in [docs/runbook.md](docs/runbook.md).
 
-**Updating later:** the dashboard footer shows the running version and flags newer releases. To update, merge this repo into the copy the deploy button created and push (Workers Builds redeploys, applying any new migrations), or `git pull` and `npm run deploy` from a local clone. Details in the runbook's [Updating a deployed instance](docs/runbook.md#updating-a-deployed-instance).
+**Updating later:** the dashboard footer shows the running version and flags newer releases. Your copy ships with a **Sync upstream** workflow (Actions tab > Sync upstream > Run workflow): clean merges deploy automatically, conflicts become a pull request you resolve in the web editor. Manual paths and details in the runbook's [Updating a deployed instance](docs/runbook.md#updating-a-deployed-instance).
 
 ## Documentation
 
