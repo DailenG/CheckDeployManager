@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/DailenG/CheckDeployManager/blob/main/SECURITY.md
+    about: Please do not open public issues for vulnerabilities. Follow the security policy instead.
+  - name: Check extension questions
+    url: https://docs.check.tech
+    about: Questions about the Check browser extension itself belong with CyberDrain, not this deployment manager.

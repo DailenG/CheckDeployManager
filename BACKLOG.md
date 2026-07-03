@@ -3,6 +3,17 @@
 Planned work that is scoped but not yet started. Items graduate from here into
 commits; keep entries current when scope changes, and delete them when shipped.
 
+## Status board (2026-07-03)
+
+Current work queue, in order. Update as items land.
+
+- [x] v0.1.0 release tag and notes (shipped: releases/tag/v0.1.0)
+- [x] Issue templates (bug report, feature request, security pointer)
+- [x] CodeQL scanning workflow
+- [ ] Onboarding wizard (item 1 below). Phase status is tracked inside the
+      item: backend endpoint with tests, then wizard page, then redirect,
+      then docs, then wiki regeneration.
+
 ## 1. Onboarding wizard on first login
 
 **Goal:** guide a fresh deployment through runbook steps 5 through 8 (instance

@@ -1,0 +1,53 @@
+name: Bug report
+description: Something in CheckDeployManager misbehaves
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. One rule before you start: **no real client data**.
+        No real tenant names, tenant GUIDs, rule URLs from your deployment, or
+        captured webhook payloads. Substitute the fictional sample tenant
+        (Harborview Physical Therapy) or redact.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Create a tenant
+        2. Publish with an empty delta
+        3. Open the Artifacts tab
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Management UI
+        - Operator API
+        - Public rules delivery
+        - Upstream sync or cron
+        - Artifacts or policy generation
+        - Deploy to Cloudflare or provisioning
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v0.1.0
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Wrangler or browser console output. Redact anything identifying.
+      render: text
