@@ -29,7 +29,14 @@ Current work queue, in order. Update as items land.
       without tenant attribution; empty stays fine for the CIPP standard,
       which fills it per tenant). Policy tab label explains the same.
 
+- [x] Dashboard footer: running version (from package.json via the status
+      endpoint), releases link, and a client-side newer-release badge.
+      Runbook gains "Updating a deployed instance" (merge upstream into
+      the deploy-button copy and push, or git pull plus npm run deploy).
+
 Queue complete. Next scoped item: GPO deployment artifacts (item 1 below).
+Release note: v0.3.0 should bundle the webhook relay, the CIPP
+attribution warning, and the version footer once the next feature lands.
 
 ## 1. GPO deployment artifacts: per-tenant GPO script plus ADMX pointers
 
