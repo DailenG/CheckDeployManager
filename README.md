@@ -2,7 +2,7 @@
 
 Multi tenant configuration service for the [Check by CyberDrain](https://docs.check.tech) browser extension, hosted entirely on Cloudflare Workers. Built for MSPs that manage Check across many client organizations, and comfortably inside the Cloudflare free tier at a few thousand endpoints.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/DailenG/CheckDeployManager) [![CI](https://github.com/DailenG/CheckDeployManager/actions/workflows/ci.yml/badge.svg)](https://github.com/DailenG/CheckDeployManager/actions/workflows/ci.yml)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/DailenG/CheckDeployManager) [![CI](https://github.com/DailenG/CheckDeployManager/actions/workflows/ci.yml/badge.svg)](https://github.com/DailenG/CheckDeployManager/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Code wiki: GitNexus](https://img.shields.io/badge/code%20wiki-GitNexus-6e40c9)](docs/wiki/README.md)
 
 ## What it does
 
@@ -11,6 +11,17 @@ Multi tenant configuration service for the [Check by CyberDrain](https://docs.ch
 - **Operations dashboard.** Draft and publish with validation gates, one-click rollback, GUID rotation and revocation with hit counters, tenant branding with logo hosting, a webhook inbox for false positive reports, upstream diff history, and an indefinite audit log. Dark mode by default.
 
 Two delivery paths stay separate by design: detection rules are URL fetched by the extension on its own schedule, while branding and enforcement settings are pushed to browsers via managed storage policy.
+
+## Screenshots
+
+All screenshots show a local instance seeded with the project's fictional sample tenant, Harborview Physical Therapy. Dark mode is the default; there is a light theme too.
+
+| | |
+|---|---|
+| ![Per-tenant deployment artifacts: managed storage JSON, reg files, Intune variables, CIPP fields](docs/screenshots/tenant-artifacts.png) | ![Rules draft editor with validation and one-click publish](docs/screenshots/tenant-rules.png) |
+| ![Upstream sync status and snapshot history](docs/screenshots/upstream.png) | ![Audit log with per-action detail](docs/screenshots/audit.png) |
+
+![Tenant branding for white-label deployments](docs/screenshots/tenant-branding.png)
 
 ## Architecture
 
