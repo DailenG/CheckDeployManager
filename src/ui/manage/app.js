@@ -857,6 +857,7 @@ async function renderUpstream() {
 const SETTING_LABELS = [
   ["public_base_url", "Public base URL (e.g. https://check.example.com; used in every generated artifact)"],
   ["default_cipp_server_url", "Default CIPP server URL (blank disables CIPP unless a tenant overrides)"],
+  ["false_positive_relay_url", "False positive relay URL (every inbound webhook report is POSTed here as JSON; for n8n, Power Automate, and similar; blank disables)"],
   ["upstream_source_url", "Upstream rules source URL"],
   ["version_suffix_label", "Version suffix label (published versions read upstream+label.n)"],
   ["metrics_retention_days", "Fetch metrics retention (days)"],

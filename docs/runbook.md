@@ -143,6 +143,12 @@ The cron runs daily (06:17 UTC). Each sync fetches the CyberDrain rules file; on
 
 False positive reports and other extension events POST to `/hook/{guid}` and land in the Inbox. Payloads are stored verbatim, treated as hostile, and always rendered escaped. Disposition events as reviewed or dismissed; dispositioned events are purged by the daily cleanup, undispositioned ones after the retention window.
 
+**Relay to automations.** Set the **False positive relay URL** instance setting to forward every inbound event to an automation platform (n8n, Power Automate, Zapier, or any webhook receiver) for tickets or notifications. Each event is POSTed once as JSON: `{source, kind, event}` where `event` carries the inbox row (id, tenant id and name, GUID, received time, event type) and the original `payload_json` as a verbatim string. Notes:
+
+- The URL must be `https://`. Platforms like n8n and Power Automate embed a capability token in the URL itself; treat the configured URL as sensitive.
+- Delivery is best effort: one attempt, no retry queue. The Inbox row is the durable record; the relay is a convenience copy, and a failed relay never fails or delays the reporting extension.
+- The relayed `payload_json` is untrusted extension input forwarded verbatim. Automations consuming it must apply the same hostility assumptions this service does: parse defensively, never render unescaped, never execute.
+
 ### Decommissioning a tenant
 
 Revoke all GUIDs, wait for revoked-hit counters to drain (confirming no clients still point at it), then Tenant > Delete. Deletion removes the tenant's rows and R2 objects; audit entries are retained.

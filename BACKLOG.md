@@ -17,6 +17,11 @@ Current work queue, in order. Update as items land.
       persistence. Entry deleted below per convention.
 - [x] Wiki regeneration for the wizard commit
 - [x] v0.2.0 release (setup wizard; package.json bumped to match)
+- [x] Webhook relay for false positives: `false_positive_relay_url`
+      instance setting; every inbound `/hook/{guid}` event is POSTed once,
+      best effort via waitUntil, as `{source, kind, event}` JSON with
+      payload_json forwarded verbatim; https only; injectable-fetcher unit
+      tests (4); documented in the runbook webhook inbox section.
 
 Queue complete. Next scoped item: GPO deployment artifacts (item 1 below).
 

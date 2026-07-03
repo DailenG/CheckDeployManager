@@ -2,7 +2,8 @@
 // as hostile: never interpreted, always HTML-escaped when rendered.
 import { Hono } from "hono";
 import type { Env } from "../types";
-import { getActiveGuid, newId, nowIso } from "../lib/db";
+import { getActiveGuid, getTenant, newId, nowIso } from "../lib/db";
+import { relayWebhookEvent } from "../lib/relay";
 
 export const MAX_HOOK_BYTES = 256 * 1024;
 
@@ -41,12 +42,34 @@ hookRoutes.post("/hook/:guid", async (c) => {
     return c.json({ error: "body is not valid JSON" }, 400);
   }
 
+  const eventId = newId();
+  const receivedAt = nowIso();
   await c.env.DB.prepare(
     "INSERT INTO webhook_events (id, tenant_id, guid, received_at, event_type, payload_json) " +
       "VALUES (?, ?, ?, ?, ?, ?)",
   )
-    .bind(newId(), guidRow.tenant_id, guidRow.guid, nowIso(), eventType, body)
+    .bind(eventId, guidRow.tenant_id, guidRow.guid, receivedAt, eventType, body)
     .run();
+
+  // Best-effort relay after the durable insert; never delays or fails the
+  // extension's request.
+  c.executionCtx.waitUntil(
+    (async () => {
+      const tenant = await getTenant(c.env.DB, guidRow.tenant_id);
+      const outcome = await relayWebhookEvent(c.env, {
+        id: eventId,
+        tenant_id: guidRow.tenant_id,
+        tenant_name: tenant?.name ?? "",
+        guid: guidRow.guid,
+        received_at: receivedAt,
+        event_type: eventType,
+        payload_json: body,
+      });
+      if (outcome.status === "failed") {
+        console.log(`webhook relay failed: ${outcome.error}`);
+      }
+    })(),
+  );
 
   return c.json({ received: true });
 });
