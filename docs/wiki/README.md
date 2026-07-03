@@ -1,86 +1,83 @@
 <!-- GENERATED FILE, do not edit by hand.
-     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit 921327d.
+     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit 3fe8c14.
      Regenerate: node .gitnexus/run.cjs wiki, then: npm run docs:wiki -->
 
 # CheckDeployManager
 
-> Generated from the GitNexus code knowledge graph at commit `921327d`.
+> Generated from the GitNexus code knowledge graph at commit `3fe8c14`.
 > Do not edit these pages by hand. To refresh after code changes, run
 > `node .gitnexus/run.cjs analyze`, `node .gitnexus/run.cjs wiki`, then `npm run docs:wiki`.
 
 
-CheckDeployManager is a multi-tenant configuration service for the Check by CyberDrain browser extension. It is built for MSPs managing Check across many client organizations, and it runs entirely on Cloudflare Workers with D1 for metadata and R2 for published rule artifacts.
+CheckDeployManager is a multi-tenant configuration service for the Check by CyberDrain browser extension, hosted on Cloudflare Workers. It helps MSPs manage Check rules across many client organizations by mirroring upstream detection rules, applying tenant-specific changes, publishing versioned rulesets, and serving deployment artifacts from a lightweight Cloudflare-native stack.
 
-At a high level, the service mirrors CyberDrain’s upstream detection rules, applies small tenant-specific deltas, validates the result, publishes immutable tenant rulesets, and serves them from unguessable public URLs such as `/rules/{guid}.json`. Operators manage tenants, branding, policies, publishing, webhooks, and audit history through the authenticated management surface.
+The service is designed around a small Worker runtime, D1 metadata storage, R2-backed rule artifacts, Cloudflare Access-protected administration, and unauthenticated public delivery URLs that rely on unguessable tenant identifiers.
 
 ```mermaid
 flowchart TD
-  Worker[Application Runtime]
-  UI[Management UI]
-  API[Operator API]
-  Auth[Authentication & Authorization]
-  Public[Public Rules Delivery]
-  Publish[Publishing & Artifacts]
-  Merge[Ruleset Validation & Merge]
-  Sync[Upstream Sync & Retention]
-  D1[(D1 Database)]
-  R2[(R2 Artifacts)]
+  Runtime[Application Runtime] --> Auth[Authentication & Authorization]
+  Runtime --> API[Operator API]
+  Runtime --> Public[Public Rules Delivery]
+  Runtime --> Scheduler[Upstream Sync & Retention]
 
-  Worker --> UI
-  Worker --> API
-  Worker --> Public
-  Worker --> Sync
-  API --> Auth
-  API --> D1
-  API --> Publish
-  Publish --> Merge
-  Publish --> D1
-  Publish --> R2
-  Public --> D1
-  Public --> R2
-  Sync --> D1
-  Sync --> Publish
+  UI[Management UI] --> API
+  API --> Publish[Publishing & Artifacts]
+  API --> Data[Data Model & Persistence]
+  API --> Audit[Audit & Webhooks]
+
+  Scheduler --> Publish
+  Scheduler --> Audit
+  Publish --> Validate[Ruleset Validation & Merge]
+  Publish --> Data
+  Public --> Data
+  Audit --> Data
 ```
 
-## How the System Fits Together
+## What It Does
 
-The [Application Runtime](application-runtime.md) is the Cloudflare Worker entry point. It wires the Hono application together, registers public rules routes, protected operator API routes, the management UI, and scheduled background work.
+At a high level, CheckDeployManager keeps an instance-wide copy of the upstream Check ruleset, lets operators maintain tenant-specific deltas, and publishes each tenant’s final browser policy output.
 
-Administrative access is handled by [Authentication & Authorization](authentication-authorization.md). Protected routes pass through `requireOperator()`, which validates Cloudflare Access JWTs through `authenticateRequest()`. The boundary is intentionally fail-closed outside local development.
+The main runtime is described in [Application Runtime](application-runtime.md). `src/index.ts` creates the Cloudflare Worker entry point, registers the Hono routes, and wires scheduled tasks. Protected routes pass through [Authentication & Authorization](authentication-authorization.md), where `requireOperator()` validates Cloudflare Access JWTs before administrative requests reach the API.
 
-Most application state lives in [Data Model & Persistence](data-model-persistence.md). The D1 schema tracks tenants, settings, upstream snapshots, published versions, webhook events, and audit records. R2 holds immutable published ruleset JSON and related public assets.
+Operators usually work through the dependency-free [Management UI](management-ui.md), served from `src/ui/manage/`. That UI talks to the authenticated [Operator API](operator-api.md), which manages tenants, drafts, publishing, logos, policy settings, upstream sync state, webhook events, audit logs, and instance settings.
 
-Rules are checked and assembled by [Ruleset Validation & Merge](ruleset-validation-merge.md). This module validates upstream rulesets and tenant delta documents, then produces the merged tenant rulesets that can be published safely.
+Published rulesets and tenant assets are delivered through [Public Rules Delivery](public-rules-delivery.md). These routes are intentionally unauthenticated: access is controlled by tenant GUIDs and preview tokens, while missing resources return minimal `404` responses.
 
-[Publishing & Artifacts](publishing-artifacts.md) turns validated tenant configuration into outputs: published ruleset versions stored in R2 and deployment artifacts generated on demand from current D1 state.
+## Architecture
 
-The daily refresh path lives in [Upstream Sync & Retention](upstream-sync-retention.md). It fetches upstream Check rules, validates and snapshots them, republishes tenant rules when needed, and prunes old operational data.
+The repository is organized around a few core boundaries:
 
-Operators interact with the system through the [Management UI](management-ui.md), a dependency-free dashboard under `src/ui/manage/`, backed by the authenticated [Operator API](operator-api.md). Browser extensions and deployment tools consume unauthenticated outputs through [Public Rules Delivery](public-rules-delivery.md), where access depends on unguessable GUIDs and preview tokens rather than login sessions.
+[Data Model & Persistence](data-model-persistence.md) is the shared storage layer. It defines the D1 schema in `migrations/0001_init.sql` and centralizes reusable helpers in `src/lib/db.ts`, including IDs, timestamps, hashes, instance settings, and common queries.
 
-Operational records are handled by [Audit & Webhooks](audit-webhooks.md). API actions and background workflows write audit entries, while tenant webhook payloads are accepted at `/hook/:guid` and persisted for later review.
+[Ruleset Validation & Merge](ruleset-validation-merge.md) keeps ruleset handling predictable. `src/lib/validate.ts` validates upstream rulesets and tenant deltas, while `src/lib/merge.ts` applies tenant changes to the active upstream snapshot.
 
-## Key End-to-End Flows
+[Publishing & Artifacts](publishing-artifacts.md) turns validated tenant configuration into deployable outputs. `src/lib/publish.ts` publishes tenant ruleset versions, and `src/lib/artifacts.ts` renders browser deployment artifacts such as registry payloads from current D1 state.
 
-### Publishing Tenant Rules
+[Upstream Sync & Retention](upstream-sync-retention.md) owns scheduled maintenance. It fetches upstream rules, validates and snapshots them, republishes affected tenant rulesets when needed, and prunes old operational data.
 
-An operator changes tenant configuration through the Management UI. The Operator API validates the request, stores the tenant delta in D1, and calls the publishing path. Publishing loads the active upstream snapshot, validates the tenant delta, merges both inputs, writes the published ruleset to R2, records the version in D1, and writes audit history.
+[Audit & Webhooks](audit-webhooks.md) records system and operator activity. API routes, publishing, and scheduled workflows use `writeAudit()`, while webhook ingestion stores tenant event payloads for later review.
 
-### Serving Rules to Check Clients
+## Key Flows
 
-A browser extension requests a public rules URL such as `/rules/{guid}.json`. Public Rules Delivery resolves the GUID through D1, finds the current published version, and returns the immutable ruleset artifact from R2. Missing, unknown, or inaccessible resources return the same bare `404` shape to avoid leaking tenant details.
+### Operator Management
 
-### Daily Upstream Sync
+An operator opens the Management UI, which calls the authenticated Operator API. The Worker checks Cloudflare Access through `requireOperator()`, then the API reads and writes D1 records through the persistence helpers. Actions such as publishing, GUID rotation, settings changes, and webhook review are written to the audit log.
 
-Cloudflare invokes the Worker scheduled handler. The Application Runtime calls the scheduled task runner, which checks instance settings, fetches the upstream ruleset, validates the payload, snapshots the result, writes audit entries, and republishes tenant rules if the upstream changed.
+### Ruleset Publishing
+
+Publishing starts with a tenant delta JSON document. The publishing layer loads the active upstream snapshot, validates the delta, merges it with upstream rules, stores the resulting ruleset artifact, and records the published version in D1. Public delivery routes then serve that version by tenant GUID.
+
+### Scheduled Upstream Sync
+
+Cloudflare invokes the Worker’s scheduled handler, which runs `runScheduledTasks()`. The sync process fetches the upstream Check ruleset, validates it, snapshots the result, records audit activity, and republishes tenant rulesets when upstream changes affect their generated output.
 
 ### Deployment Artifact Generation
 
-Operators can request deployment artifacts from the API. Publishing & Artifacts reads tenant and instance state from D1, renders the required browser deployment outputs, escapes registry values where needed, and returns a generated bundle without storing those artifacts permanently.
+Artifact generation reads current tenant and policy state from D1, builds an artifact bundle, and renders deployment formats on demand. Registry output flows through helpers such as `buildRegFile()`, `regNumberedStrings()`, `regString()`, and `regEscape()` so generated Windows artifacts remain consistently escaped.
 
-### Authentication Boundary
+### Public Runtime Delivery
 
-Protected management requests enter through the Operator API and pass through `requireOperator()`. That middleware calls the Cloudflare Access JWT validation path, decodes and verifies the token, and places operator identity into request context for downstream handlers and audit records.
+Browser clients fetch rules, previews, and logos through public routes. These endpoints avoid session authentication and instead rely on unguessable identifiers or preview tokens. They read published state from D1 and return only the requested tenant-specific content.
 
 ## Local Development
 
@@ -96,34 +93,36 @@ Run the Worker locally:
 npm run dev
 ```
 
-Run tests and type checks before submitting changes:
+Run validation before changing behavior:
 
 ```bash
-npm test
+npm run test
 npm run typecheck
 ```
 
-Apply local D1 migrations when setting up or resetting the development database:
+Apply local D1 migrations when working with persistence:
 
 ```bash
 npm run migrate:local
 ```
 
-Deploy to Cloudflare Workers with:
+Deploy through the configured Cloudflare Workers project:
 
 ```bash
 npm run deploy
 ```
 
-Regenerate wiki documentation with:
+Regenerate the repository wiki from the indexed code model:
 
 ```bash
 npm run docs:wiki
 ```
 
-## Where to Start
+## Where To Start
 
-For a first code walkthrough, start with [Application Runtime](application-runtime.md) to see how requests enter the Worker, then read [Operator API](operator-api.md) and [Public Rules Delivery](public-rules-delivery.md) to understand the two main HTTP surfaces. From there, [Data Model & Persistence](data-model-persistence.md), [Publishing & Artifacts](publishing-artifacts.md), and [Upstream Sync & Retention](upstream-sync-retention.md) explain the core state transitions that make the service work.
+New developers should begin with [Application Runtime](application-runtime.md) to understand how the Worker is assembled, then read [Data Model & Persistence](data-model-persistence.md) because most modules depend on the D1 schema and shared helpers.
+
+For feature work, follow the request path: UI behavior usually starts in [Management UI](management-ui.md), administrative behavior in [Operator API](operator-api.md), generated ruleset behavior in [Publishing & Artifacts](publishing-artifacts.md), and scheduled upstream behavior in [Upstream Sync & Retention](upstream-sync-retention.md).
 
 ## Module pages
 

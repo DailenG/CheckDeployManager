@@ -15,7 +15,9 @@ Current work queue, in order. Update as items land.
       wizard screenshot). Verified end to end headless against a fresh
       local DB: redirect, step unlock order, nav escape, finish, skip
       persistence. Entry deleted below per convention.
-- [ ] Wiki regeneration for the wizard commit (follows in a docs commit)
+- [x] Wiki regeneration for the wizard commit
+
+Queue complete. Next scoped item: GPO deployment artifacts (item 1 below).
 
 ## 1. GPO deployment artifacts: per-tenant GPO script plus ADMX pointers
 
