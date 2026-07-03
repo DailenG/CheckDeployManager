@@ -35,6 +35,12 @@ The stack is fixed: TypeScript on Workers, Hono for routing, D1 and R2 for stora
 - Tests must not depend on the network. The upstream fixture under `test/fixtures/` is a checked-in snapshot of the real CyberDrain rules file; refresh it deliberately, not incidentally.
 - `npm test` and `npx tsc --noEmit` must both pass.
 
+## Documentation
+
+- `docs/architecture.md` and `docs/runbook.md` are hand-written and maintained; update them when behavior they describe changes.
+- `docs/wiki/` is generated, never hand-edited. It mirrors the GitNexus knowledge-graph wiki (`.gitnexus/wiki`, which is local-only and not committed). After code changes that alter module structure or flows, refresh it with `node .gitnexus/run.cjs analyze`, then `node .gitnexus/run.cjs wiki`, then `npm run docs:wiki`, and commit the resulting diff.
+- Each mirrored page carries a header comment naming the source commit, so a stale wiki is detectable at review time.
+
 ## Commit style
 
 Conventional commits (`feat:`, `fix:`, `docs:`, `chore:`, `test:`).

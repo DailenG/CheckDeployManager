@@ -16,7 +16,7 @@ Two delivery paths stay separate by design: detection rules are URL fetched by t
 
 One Worker serves everything: the public runtime endpoints (`/rules`, `/preview`, `/assets`, `/hook`), the management API and dashboard (`/api`, `/manage`, protected by Cloudflare Access plus in-Worker JWT validation), and a daily cron that syncs upstream rules and applies retention. State lives in D1 (tenants, versions, settings, audit, metrics) and R2 (upstream snapshots, published rulesets, logos). No KV, no frontend framework, no build step for the UI.
 
-See [docs/architecture.md](docs/architecture.md) for the full design and threat model.
+See [docs/architecture.md](docs/architecture.md) for the full design and threat model, or the [code wiki](docs/wiki/README.md) for a generated module-by-module tour of the implementation.
 
 ## Local development
 
@@ -83,6 +83,7 @@ The full runbook with verification steps lives in [docs/runbook.md](docs/runbook
 
 - [docs/architecture.md](docs/architecture.md): design, data model, endpoint contracts, threat model
 - [docs/runbook.md](docs/runbook.md): full post-deploy and operations runbook
+- [docs/wiki/](docs/wiki/README.md): code wiki generated from the GitNexus knowledge graph, one page per module (runtime, auth, data model, validation and merge, sync, publishing, audit, public delivery, API, UI)
 - [CONTRIBUTING.md](CONTRIBUTING.md): development workflow and repository rules
 - [SECURITY.md](SECURITY.md): threat model summary and disclosure contact
 

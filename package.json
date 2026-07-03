@@ -9,7 +9,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
     "test": "vitest run",
-    "migrate:local": "wrangler d1 migrations apply DB --local"
+    "migrate:local": "wrangler d1 migrations apply DB --local",
+    "docs:wiki": "node scripts/sync-wiki.mjs"
   },
   "dependencies": {
     "hono": "^4.12.27"
