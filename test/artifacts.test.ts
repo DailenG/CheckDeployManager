@@ -123,6 +123,30 @@ describe("CIPP defaults for a fresh install", () => {
       "https://cipp.override.test",
     );
   });
+
+  it("warns when CIPP reporting is enabled without a tenant id", () => {
+    const missingTenant = buildArtifactBundle({
+      ...HARBORVIEW_ARTIFACT_INPUT,
+      policySettings: {
+        ...HARBORVIEW_ARTIFACT_INPUT.policySettings,
+        cippTenantId: "",
+      },
+    });
+    expect(missingTenant.chrome_managed_storage.cippTenantId).toBe("");
+    expect(missingTenant.warnings.length).toBe(1);
+    expect(missingTenant.warnings[0]).toContain("tenant id");
+
+    // The sample input carries a tenant domain, so no warnings.
+    expect(bundle.warnings).toEqual([]);
+
+    // CIPP off entirely: an empty tenant id is not a problem.
+    const cippOff = buildArtifactBundle({
+      ...HARBORVIEW_ARTIFACT_INPUT,
+      defaultCippServerUrl: "",
+      policySettings: {},
+    });
+    expect(cippOff.warnings).toEqual([]);
+  });
 });
 
 describe("GET /api/tenants/{id}/artifacts", () => {

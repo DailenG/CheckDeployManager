@@ -520,7 +520,7 @@ async function renderPolicyTab(container, tenantId) {
       <label class="check"><input type="checkbox" id="p-cipp" ${check(s.enableCippReporting, false)}> Enable CIPP reporting</label>
       <div class="grid2">
         <label class="field"><span>CIPP server URL (blank uses the instance default)</span><input type="text" id="p-cipp-url" value="${esc(s.cippServerUrl || "")}"></label>
-        <label class="field"><span>CIPP tenant id / domain</span><input type="text" id="p-cipp-tenant" value="${esc(s.cippTenantId || "")}"></label>
+        <label class="field"><span>CIPP tenant id / domain (needed to attribute events when deploying outside the CIPP standard, which fills it per tenant)</span><input type="text" id="p-cipp-tenant" value="${esc(s.cippTenantId || "")}"></label>
       </div>
       <button id="save-policy" class="primary">Save policy settings</button>
     </div>`;
@@ -602,6 +602,12 @@ async function renderArtifactsTab(container, tenantId) {
         <dt>GUID in use</dt><dd class="mono">${esc(artifacts.guid)}</dd>
       </dl>
     </div>
+    ${(artifacts.warnings || [])
+      .map(
+        (warning) =>
+          `<div class="panel"><span class="badge warn">warning</span> ${esc(warning)}</div>`,
+      )
+      .join("")}
     <div class="panel">
       ${artifactSection(
         "managed",

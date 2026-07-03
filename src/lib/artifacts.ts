@@ -32,6 +32,7 @@ export interface ArtifactBundle {
   reg_edge: string;
   intune_variables: string;
   cipp_fields: { field: string; value: string }[];
+  warnings: string[];
 }
 
 interface ResolvedPolicy {
@@ -373,6 +374,20 @@ export function buildArtifactBundle(input: ArtifactInput): ArtifactBundle {
     },
   };
 
+  // Deployment mistakes worth flagging next to the files that carry them.
+  // CIPP's own deployment standard fills cippTenantId per tenant, so an
+  // empty value is only a problem for directly deployed artifacts.
+  const warnings: string[] = [];
+  if (policy.enableCippReporting && policy.cippTenantId.length === 0) {
+    warnings.push(
+      "CIPP reporting is enabled but no CIPP tenant id or domain is set. " +
+        "Artifacts deployed directly (managed storage, reg files, Intune) " +
+        "will report events without tenant attribution. Set it on the " +
+        "Policy tab; ignore this only when deploying via the CIPP " +
+        "deployment standard, which fills it per tenant.",
+    );
+  }
+
   return {
     guid: input.guid,
     config_url: configUrl,
@@ -386,6 +401,7 @@ export function buildArtifactBundle(input: ArtifactInput): ArtifactBundle {
     reg_edge: buildRegFile("edge", managedStorage),
     intune_variables: buildIntuneVariables(policy, input.branding, urls),
     cipp_fields: buildCippFields(policy, input.branding, urls),
+    warnings,
   };
 }
 

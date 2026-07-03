@@ -23,6 +23,12 @@ Current work queue, in order. Update as items land.
       payload_json forwarded verbatim; https only; injectable-fetcher unit
       tests (4); documented in the runbook webhook inbox section.
 
+- [x] CIPP tenant attribution guard: artifact bundles gain a `warnings`
+      array; enabling CIPP reporting with an empty `cippTenantId` warns on
+      the Artifacts tab (directly deployed artifacts would report events
+      without tenant attribution; empty stays fine for the CIPP standard,
+      which fills it per tenant). Policy tab label explains the same.
+
 Queue complete. Next scoped item: GPO deployment artifacts (item 1 below).
 
 ## 1. GPO deployment artifacts: per-tenant GPO script plus ADMX pointers
