@@ -16,6 +16,7 @@ Current work queue, in order. Update as items land.
       local DB: redirect, step unlock order, nav escape, finish, skip
       persistence. Entry deleted below per convention.
 - [x] Wiki regeneration for the wizard commit
+- [x] v0.2.0 release (setup wizard; package.json bumped to match)
 
 Queue complete. Next scoped item: GPO deployment artifacts (item 1 below).
 
