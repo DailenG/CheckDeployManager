@@ -143,6 +143,58 @@ async function refreshOnboardingStatus() {
   const showSetup =
     onboardingStatus !== null && !onboardingStatus.onboarding_complete;
   document.getElementById("nav-setup").classList.toggle("hidden", !showSetup);
+  renderFooter(onboardingStatus);
+}
+
+/* ---------- footer and update check ---------- */
+
+const REPO_URL = "https://github.com/DailenG/CheckDeployManager";
+let updateCheckDone = false;
+
+function renderFooter(status) {
+  const footer = document.getElementById("app-footer");
+  const version = status !== null && status.version ? String(status.version) : "";
+  footer.innerHTML = `<span class="brand-mark">Check</span>DeployManager${
+    version ? ` <span class="mono">v${esc(version)}</span>` : ""
+  } &middot; <a href="${REPO_URL}/releases" target="_blank" rel="noreferrer">Releases</a><span id="update-hint"></span>`;
+  if (version && !updateCheckDone) {
+    updateCheckDone = true;
+    checkForUpdate(version);
+  }
+}
+
+// Newer-release nudge. Runs once per page load, from the operator's browser
+// only (never the Worker), and stays silent on any failure so offline or
+// rate-limited instances lose nothing.
+async function checkForUpdate(current) {
+  try {
+    const response = await fetch(
+      "https://api.github.com/repos/DailenG/CheckDeployManager/releases/latest",
+    );
+    if (!response.ok) return;
+    const release = await response.json();
+    const latest = String(release.tag_name || "").replace(/^v/, "");
+    if (latest && isNewerVersion(latest, current)) {
+      const hint = document.getElementById("update-hint");
+      if (hint) {
+        hint.innerHTML = ` <a class="badge accent" href="${REPO_URL}/releases/tag/${esc(
+          String(release.tag_name),
+        )}" target="_blank" rel="noreferrer">v${esc(latest)} available</a>`;
+      }
+    }
+  } catch {
+    /* silent */
+  }
+}
+
+function isNewerVersion(candidate, current) {
+  const a = candidate.split(".").map((part) => parseInt(part, 10) || 0);
+  const b = current.split(".").map((part) => parseInt(part, 10) || 0);
+  for (let i = 0; i < 3; i++) {
+    if ((a[i] || 0) > (b[i] || 0)) return true;
+    if ((a[i] || 0) < (b[i] || 0)) return false;
+  }
+  return false;
 }
 
 const routes = [

@@ -425,6 +425,7 @@ describe("instance status", () => {
     const body = await response.json<any>();
     expect(body.operator_email).toBe(DEV_OPERATOR);
     expect(body.environment).toBe("development");
+    expect(body.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(body.onboarding_complete).toBe(false);
     expect(body.checks).toEqual({
       settings_configured: false,

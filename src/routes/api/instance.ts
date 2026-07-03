@@ -9,6 +9,7 @@ import {
 } from "../../lib/db";
 import { writeAudit } from "../../lib/audit";
 import { readJsonBody } from "./util";
+import pkg from "../../../package.json";
 
 const INTEGER_SETTINGS = new Set([
   "metrics_retention_days",
@@ -55,6 +56,7 @@ instanceRoutes.get("/status", async (c) => {
   return c.json({
     operator_email: c.get("operatorEmail"),
     environment: c.env.ENVIRONMENT,
+    version: pkg.version,
     onboarding_complete: completedAt !== "",
     checks: {
       settings_configured: settings.public_base_url !== "",

@@ -197,6 +197,15 @@ pre.code {
 }
 .toast.hidden { display: none; }
 .hidden { display: none; }
+
+.footer {
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 28px 0 18px;
+}
+.footer a { color: var(--muted); }
+.footer a.badge { margin-left: 6px; }
 .toast.error { border-color: var(--bad); }
 
 .logo-preview {

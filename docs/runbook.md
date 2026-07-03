@@ -135,6 +135,43 @@ Tenant > Versions > Roll back to this. The pointer moves to the selected immutab
 3. Watch traffic move to the new GUID, then **Revoke** the old one.
 4. After revocation, the old URL returns a bare 404 and hits are counted on the GUIDs tab; a nonzero count means some endpoints still carry the old policy.
 
+### Updating a deployed instance
+
+The dashboard footer shows the running version and, when a newer release
+exists, a "vX.Y.Z available" link (checked from your browser against the
+GitHub releases API once per page load; the Worker itself never calls out
+for this).
+
+How you update depends on how you deployed:
+
+- **Deploy button.** The button created a standalone copy of this repo in
+  your GitHub or GitLab account with Workers Builds attached, so updates
+  flow through that copy. From a clone of it, pull this repo and push:
+
+  ```
+  git remote add upstream https://github.com/DailenG/CheckDeployManager.git
+  git fetch upstream
+  git merge upstream/main
+  git push
+  ```
+
+  (`remote add` only the first time.) The push triggers Workers Builds,
+  which runs the configured deploy command; `npm run deploy` applies any
+  new D1 migrations before deploying the Worker.
+
+- **Local clone with wrangler.** `git pull`, then `npm run deploy`.
+
+Notes for either path:
+
+- Read the release notes first: https://github.com/DailenG/CheckDeployManager/releases
+- Migrations are additive and applied automatically by `npm run deploy`;
+  never edit or reorder shipped migration files.
+- A deploy overwrites dashboard-set Worker vars with the config's values
+  (see 1.3): keep your real `ACCESS_TEAM_DOMAIN` and `ACCESS_APP_AUD` in
+  your copy's `wrangler.jsonc` so an update cannot lock you out.
+- If your copy has local changes, the merge may conflict; resolve in your
+  copy, or keep customizations in separate files where possible.
+
 ### Upstream sync
 
 The cron runs daily (06:17 UTC). Each sync fetches the CyberDrain rules file; on change it validates, snapshots to R2, records a diff summary, and republishes every tenant with a published version using that tenant's frozen delta. A snapshot that fails validation never replaces the active one; it is stored, flagged in the history, and the dashboard shows the failure. Force a sync any time from Upstream > Sync now.

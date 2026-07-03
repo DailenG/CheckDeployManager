@@ -94,6 +94,8 @@ On your first login the dashboard opens a **setup wizard** that walks steps 5 th
 
 The full runbook with verification steps lives in [docs/runbook.md](docs/runbook.md).
 
+**Updating later:** the dashboard footer shows the running version and flags newer releases. To update, merge this repo into the copy the deploy button created and push (Workers Builds redeploys, applying any new migrations), or `git pull` and `npm run deploy` from a local clone. Details in the runbook's [Updating a deployed instance](docs/runbook.md#updating-a-deployed-instance).
+
 ## Documentation
 
 - [docs/architecture.md](docs/architecture.md): design, data model, endpoint contracts, threat model
