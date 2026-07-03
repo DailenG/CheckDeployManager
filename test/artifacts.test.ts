@@ -14,6 +14,7 @@ import firefoxFullGolden from "./golden/firefox-policies-full.json";
 import cippFieldsGolden from "./golden/cipp-fields.json";
 import chromeRegGolden from "./golden/chrome.reg?raw";
 import edgeRegGolden from "./golden/edge.reg?raw";
+import gpoScriptGolden from "./golden/gpo-script.ps1?raw";
 import intuneGolden from "./golden/intune-variables.ps1?raw";
 
 const bundle = buildArtifactBundle(HARBORVIEW_ARTIFACT_INPUT);
@@ -55,6 +56,28 @@ describe("artifact golden files (Harborview sample)", () => {
   it("renders the Intune variable block", () => {
     expect(normalizeNewlines(bundle.intune_variables)).toBe(
       normalizeNewlines(intuneGolden),
+    );
+  });
+
+  it("renders the GPO creation script in sync with the reg files", () => {
+    expect(normalizeNewlines(bundle.gpo_script)).toBe(
+      normalizeNewlines(gpoScriptGolden),
+    );
+    // Every registry value in the reg files must appear as a
+    // Set-GPRegistryValue write, for both browser hives.
+    expect(bundle.gpo_script).toContain(
+      "HKLM\\SOFTWARE\\Policies\\Google\\Chrome\\ExtensionSettings",
+    );
+    expect(bundle.gpo_script).toContain(
+      "HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge\\ExtensionSettings",
+    );
+    expect(bundle.gpo_script).toContain("customRulesUrl");
+    expect(bundle.gpo_script).toContain("New-GPLink");
+    // Rule 4: generated PowerShell never sequences with && or ||.
+    expect(bundle.gpo_script).not.toMatch(/&&|\|\|/);
+    // 7-bit ASCII only.
+    expect([...bundle.gpo_script].every((ch) => ch.charCodeAt(0) <= 126)).toBe(
+      true,
     );
   });
 

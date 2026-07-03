@@ -54,7 +54,7 @@ flowchart LR
 | Publish | Operator edits tenant delta (draft) -> validation gates -> merge delta onto current upstream snapshot -> write immutable version object to R2 -> update current-version pointer in D1 -> audit entry |
 | Upstream sync | Daily cron fetches CyberDrain `detection-rules.json` -> validate -> if hash changed, store snapshot in R2, re-merge and auto-publish every tenant, record diff summary; on validation failure keep last good snapshot and flag the dashboard |
 | Webhook | Extension POST `/hook/{guid}` -> size and content-type checks -> stored in D1 inbox -> reviewed in dashboard |
-| Policy generation | Dashboard renders per tenant artifacts (Chrome/Edge JSON, Firefox JSON, registry/.reg, Intune variable block, CIPP field values) from D1 state; nothing is stored, always generated fresh |
+| Policy generation | Dashboard renders per tenant artifacts (Chrome/Edge JSON, Firefox JSON, registry/.reg, GPO creation script, Intune variable block, CIPP field values) from D1 state; nothing is stored, always generated fresh |
 
 ### 1.4 Decisions carried in from discovery
 
@@ -454,6 +454,8 @@ Windows Registry Editor Version 5.00
 ```
 
 For admins using the Check ADMX (Deploy-ADMX.ps1 workflow), the dashboard also renders the same values as a field-by-field table matching the template UI under `Computer Configuration > Policies > Administrative Templates > CyberDrain > Check`.
+
+The Artifacts tab also renders a ready-to-run **GPO creation script** (`check-gpo-script.ps1`): a `New-GPO` / `Set-GPRegistryValue` PowerShell script that writes every value above for both browsers into a named GPO, printing the `New-GPLink` command as guidance rather than linking an OU itself. Both the `.reg` files and the script derive from one shared registry-writes table in the generator, so they cannot drift; golden tests lock both. The script links to Check's upstream ADMX/ADML at a pinned release tag rather than vendoring them: the templates are AGPL-3.0 and this repository is MIT, so they are referenced, never copied. The templates stay optional for enforcement (values are written directly) and exist to make the GPO readable in the Group Policy Management Editor.
 
 ### 5.4 Intune artifact (Check Setup script variable block)
 

@@ -702,6 +702,18 @@ async function renderArtifactsTab(container, tenantId) {
         "text/plain",
       )}
       ${artifactSection(
+        "gpo-script",
+        "GPO creation script (Chrome and Edge)",
+        "Run on a domain-joined management host with RSAT to create or update a GPO carrying every value from the registry files above. The script prints the New-GPLink command to run when you are ready to link it. Import Check's ADMX templates once per domain (central store) so the values are readable in the Group Policy Management Editor.",
+        artifacts.gpo_script,
+        "check-gpo-script.ps1",
+        "text/plain",
+      )}
+      <p class="muted">ADMX templates (upstream, pinned):
+        <a href="https://github.com/CyberDrain/Check/blob/v1.1.0/enterprise/admx/Check-Extension.admx" target="_blank" rel="noreferrer">Check-Extension.admx</a> &middot;
+        <a href="https://github.com/CyberDrain/Check/blob/v1.1.0/enterprise/admx/en-US/Check-Extension.adml" target="_blank" rel="noreferrer">Check-Extension.adml</a> &middot;
+        <a href="https://docs.check.tech/deployment/chrome-edge-deployment-instructions/windows/domain-deployment" target="_blank" rel="noreferrer">Domain deployment docs</a></p>
+      ${artifactSection(
         "intune",
         "Intune variable block (Check Setup script)",
         "Paste these values into Check's Setup-Windows-Chrome-and-Edge.ps1 workflow, then package per the Check docs.",

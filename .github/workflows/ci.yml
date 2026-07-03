@@ -77,7 +77,7 @@ jobs:
       # CONTRIBUTING rule 4: PowerShell emitted as text never uses && or ||.
       - name: PowerShell text rules
         run: |
-          if grep -nE '&&|\|\|' test/golden/intune-variables.ps1; then
+          if grep -nE '&&|\|\|' test/golden/intune-variables.ps1 test/golden/gpo-script.ps1; then
             echo "::error::Generated PowerShell must not use && or ||."
             exit 1
           fi

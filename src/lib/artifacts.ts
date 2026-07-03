@@ -30,6 +30,7 @@ export interface ArtifactBundle {
   firefox_policies_full: Record<string, unknown>;
   reg_chrome: string;
   reg_edge: string;
+  gpo_script: string;
   intune_variables: string;
   cipp_fields: { field: string; value: string }[];
   warnings: string[];
@@ -157,12 +158,83 @@ function regDword(name: string, value: number | boolean): string {
   return `"${regEscape(name)}"=dword:${(numeric >>> 0).toString(16).padStart(8, "0")}`;
 }
 
-function regNumberedStrings(values: string[]): string[] {
-  return values.map((value, index) => regString(String(index + 1), value));
+interface RegistryWrite {
+  subKey: string;
+  name: string;
+  kind: "string" | "dword";
+  value: string | number | boolean;
+}
+
+// Single ordered table of every registry value the Check policy needs,
+// relative to the browser's policy hive. Both the .reg renderer and the GPO
+// script derive from it, so the two artifacts cannot drift. Order matters:
+// consecutive entries with the same subKey become one .reg section.
+function registryWrites(
+  browser: "chrome" | "edge",
+  payload: Record<string, unknown>,
+): RegistryWrite[] {
+  const extensionId = browser === "chrome" ? CHROME_EXTENSION_ID : EDGE_EXTENSION_ID;
+  const updateUrl = browser === "chrome" ? CHROME_UPDATE_URL : EDGE_UPDATE_URL;
+  const policyKey = `3rdparty\\extensions\\${extensionId}\\policy`;
+  const writes: RegistryWrite[] = [];
+  const str = (subKey: string, name: string, value: string) => {
+    writes.push({ subKey, name, kind: "string", value });
+  };
+  const dword = (subKey: string, name: string, value: number | boolean) => {
+    writes.push({ subKey, name, kind: "dword", value });
+  };
+
+  str(`ExtensionSettings\\${extensionId}`, "installation_mode", "force_installed");
+  str(`ExtensionSettings\\${extensionId}`, "update_url", updateUrl);
+
+  str(policyKey, "customRulesUrl", String(payload.customRulesUrl));
+  dword(policyKey, "updateInterval", Number(payload.updateInterval));
+  dword(policyKey, "enablePageBlocking", Boolean(payload.enablePageBlocking));
+  dword(policyKey, "showNotifications", Boolean(payload.showNotifications));
+  dword(policyKey, "enableValidPageBadge", Boolean(payload.enableValidPageBadge));
+  dword(policyKey, "validPageBadgeTimeout", Number(payload.validPageBadgeTimeout));
+  dword(policyKey, "enableDebugLogging", Boolean(payload.enableDebugLogging));
+  dword(policyKey, "enableCippReporting", Boolean(payload.enableCippReporting));
+  if (payload.enableCippReporting === true) {
+    str(policyKey, "cippServerUrl", String(payload.cippServerUrl));
+    str(policyKey, "cippTenantId", String(payload.cippTenantId));
+  }
+
+  const allowlist = Array.isArray(payload.urlAllowlist)
+    ? payload.urlAllowlist.map(String)
+    : [];
+  allowlist.forEach((value, index) => {
+    str(`${policyKey}\\urlAllowlist`, String(index + 1), value);
+  });
+
+  const webhook = payload.genericWebhook as Record<string, unknown>;
+  dword(`${policyKey}\\genericWebhook`, "enabled", Boolean(webhook.enabled));
+  str(`${policyKey}\\genericWebhook`, "url", String(webhook.url));
+  const events = Array.isArray(webhook.events) ? webhook.events.map(String) : [];
+  events.forEach((value, index) => {
+    str(`${policyKey}\\genericWebhook\\events`, String(index + 1), value);
+  });
+
+  const domainSquatting = payload.domainSquatting as Record<string, unknown>;
+  for (const [key, value] of Object.entries(domainSquatting)) {
+    if (typeof value === "boolean" || typeof value === "number") {
+      dword(`${policyKey}\\domainSquatting`, key, value);
+    } else {
+      str(`${policyKey}\\domainSquatting`, key, String(value));
+    }
+  }
+
+  const brandingPayload = payload.customBranding as Record<string, unknown>;
+  for (const [key, value] of Object.entries(brandingPayload)) {
+    str(`${policyKey}\\customBranding`, key, String(value));
+  }
+
+  return writes;
 }
 
 // Renders the .reg artifact (design 5.3). Chrome and Edge differ only in
-// hive path, extension id, and update URL.
+// hive path, extension id, and update URL. Byte-for-byte output is locked
+// by the golden tests; the section grouping mirrors the write order.
 function buildRegFile(
   browser: "chrome" | "edge",
   payload: Record<string, unknown>,
@@ -171,71 +243,115 @@ function buildRegFile(
     browser === "chrome"
       ? "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Google\\Chrome"
       : "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Edge";
-  const extensionId = browser === "chrome" ? CHROME_EXTENSION_ID : EDGE_EXTENSION_ID;
-  const updateUrl = browser === "chrome" ? CHROME_UPDATE_URL : EDGE_UPDATE_URL;
-  const policyKey = `${hive}\\3rdparty\\extensions\\${extensionId}\\policy`;
 
   const lines: string[] = ["Windows Registry Editor Version 5.00", ""];
-
-  lines.push(`[${hive}\\ExtensionSettings\\${extensionId}]`);
-  lines.push(regString("installation_mode", "force_installed"));
-  lines.push(regString("update_url", updateUrl));
-  lines.push("");
-
-  lines.push(`[${policyKey}]`);
-  lines.push(regString("customRulesUrl", String(payload.customRulesUrl)));
-  lines.push(regDword("updateInterval", Number(payload.updateInterval)));
-  lines.push(regDword("enablePageBlocking", Boolean(payload.enablePageBlocking)));
-  lines.push(regDword("showNotifications", Boolean(payload.showNotifications)));
-  lines.push(regDword("enableValidPageBadge", Boolean(payload.enableValidPageBadge)));
-  lines.push(regDword("validPageBadgeTimeout", Number(payload.validPageBadgeTimeout)));
-  lines.push(regDword("enableDebugLogging", Boolean(payload.enableDebugLogging)));
-  lines.push(regDword("enableCippReporting", Boolean(payload.enableCippReporting)));
-  if (payload.enableCippReporting === true) {
-    lines.push(regString("cippServerUrl", String(payload.cippServerUrl)));
-    lines.push(regString("cippTenantId", String(payload.cippTenantId)));
-  }
-  lines.push("");
-
-  const allowlist = Array.isArray(payload.urlAllowlist)
-    ? payload.urlAllowlist.map(String)
-    : [];
-  if (allowlist.length > 0) {
-    lines.push(`[${policyKey}\\urlAllowlist]`);
-    lines.push(...regNumberedStrings(allowlist));
-    lines.push("");
-  }
-
-  const webhook = payload.genericWebhook as Record<string, unknown>;
-  lines.push(`[${policyKey}\\genericWebhook]`);
-  lines.push(regDword("enabled", Boolean(webhook.enabled)));
-  lines.push(regString("url", String(webhook.url)));
-  lines.push("");
-  const events = Array.isArray(webhook.events) ? webhook.events.map(String) : [];
-  if (events.length > 0) {
-    lines.push(`[${policyKey}\\genericWebhook\\events]`);
-    lines.push(...regNumberedStrings(events));
-    lines.push("");
-  }
-
-  const domainSquatting = payload.domainSquatting as Record<string, unknown>;
-  lines.push(`[${policyKey}\\domainSquatting]`);
-  for (const [key, value] of Object.entries(domainSquatting)) {
-    if (typeof value === "boolean" || typeof value === "number") {
-      lines.push(regDword(key, value));
-    } else {
-      lines.push(regString(key, String(value)));
+  let currentSubKey: string | null = null;
+  for (const write of registryWrites(browser, payload)) {
+    if (write.subKey !== currentSubKey) {
+      if (currentSubKey !== null) lines.push("");
+      lines.push(`[${hive}\\${write.subKey}]`);
+      currentSubKey = write.subKey;
     }
+    lines.push(
+      write.kind === "string"
+        ? regString(write.name, String(write.value))
+        : regDword(write.name, write.value as number | boolean),
+    );
   }
   lines.push("");
 
-  const brandingPayload = payload.customBranding as Record<string, unknown>;
-  lines.push(`[${policyKey}\\customBranding]`);
-  for (const [key, value] of Object.entries(brandingPayload)) {
-    lines.push(regString(key, String(value)));
-  }
-  lines.push("");
+  return lines.join("\r\n");
+}
 
+// URL of Check's hand-authored ADMX templates, pinned to a release tag so a
+// policy rename upstream cannot silently change what operators import. The
+// AGPL-3.0 templates are linked, never vendored into this MIT codebase.
+export const CHECK_ADMX_URL =
+  "https://github.com/CyberDrain/Check/tree/v1.1.0/enterprise/admx";
+
+// Ready-to-run GPO creation script. Every registry value derives from the
+// same registryWrites table as the .reg files, so the two artifacts cannot
+// drift. PowerShell guardrails apply to the generated text: full descriptive
+// names, 7-bit ASCII only, no && or || sequencing. Values are single-quoted
+// so nothing in a URL, pattern, or branding string interpolates.
+function buildGpoScript(payload: Record<string, unknown>): string {
+  const lines: string[] = [
+    "<#",
+    "Creates or updates a Group Policy Object that force-installs the Check",
+    "browser extension for Chrome and Edge and applies this tenant's policy",
+    "and branding values. Generated by CheckDeployManager; download a fresh",
+    "copy from the tenant's Artifacts tab after any policy or branding",
+    "change, then re-run.",
+    "",
+    "Requires the Group Policy PowerShell module (RSAT) and permission to",
+    "create and edit GPOs; run on a domain-joined management host.",
+    "",
+    "Registry values are written directly, so the ADMX templates are not",
+    "required for enforcement. Import them once per domain (central store)",
+    "to make these values readable in the Group Policy Management Editor:",
+    `${CHECK_ADMX_URL}`,
+    "#>",
+    "param(",
+    "    [string]$GroupPolicyName = 'Check Browser Extension',",
+    "    [string]$DomainName = ''",
+    ")",
+    "",
+    "$ErrorActionPreference = 'Stop'",
+    "Import-Module GroupPolicy",
+    "",
+    "$domainParameters = @{}",
+    "if ($DomainName -ne '') { $domainParameters['Domain'] = $DomainName }",
+    "",
+    "$groupPolicyObject = Get-GPO -Name $GroupPolicyName @domainParameters -ErrorAction SilentlyContinue",
+    "if ($null -eq $groupPolicyObject) {",
+    "    $groupPolicyObject = New-GPO -Name $GroupPolicyName @domainParameters",
+    '    Write-Output "Created GPO named $GroupPolicyName."',
+    "} else {",
+    '    Write-Output "Updating existing GPO named $GroupPolicyName."',
+    "}",
+    "",
+  ];
+
+  let valueCount = 0;
+  for (const browser of ["chrome", "edge"] as const) {
+    const hive =
+      browser === "chrome"
+        ? "HKLM\\SOFTWARE\\Policies\\Google\\Chrome"
+        : "HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge";
+    lines.push(browser === "chrome" ? "# Google Chrome" : "# Microsoft Edge");
+    for (const write of registryWrites(browser, payload)) {
+      const key = powershellSingleQuote(`${hive}\\${write.subKey}`);
+      const name = powershellSingleQuote(write.name);
+      if (write.kind === "string") {
+        lines.push(
+          `Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key ${key} -ValueName ${name} -Type String -Value ${powershellSingleQuote(String(write.value))} | Out-Null`,
+        );
+      } else {
+        const numeric =
+          typeof write.value === "boolean"
+            ? write.value
+              ? 1
+              : 0
+            : Number(write.value);
+        lines.push(
+          `Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key ${key} -ValueName ${name} -Type DWord -Value ${numeric} | Out-Null`,
+        );
+      }
+      valueCount += 1;
+    }
+    lines.push("");
+  }
+
+  lines.push(
+    `Write-Output 'Applied ${valueCount} registry values for Chrome and Edge.'`,
+  );
+  lines.push(
+    "Write-Output 'Link the GPO to an organizational unit when ready, for example:'",
+  );
+  lines.push(
+    "Write-Output \"  New-GPLink -Name '$GroupPolicyName' -Target 'OU=Workstations,DC=example,DC=com'\"",
+  );
+  lines.push("");
   return lines.join("\r\n");
 }
 
@@ -251,6 +367,12 @@ function toAscii(value: string): string {
 
 function powershellQuote(value: string): string {
   return `"${toAscii(value).replace(/`/g, "``").replace(/"/g, '`"')}"`;
+}
+
+// Literal single-quoted PowerShell string: nothing interpolates, only the
+// quote itself needs doubling.
+function powershellSingleQuote(value: string): string {
+  return `'${toAscii(value).replace(/'/g, "''")}'`;
 }
 
 function powershellArray(values: string[]): string {
@@ -399,6 +521,7 @@ export function buildArtifactBundle(input: ArtifactInput): ArtifactBundle {
     firefox_policies_full: buildFirefoxFull(firefoxFragment),
     reg_chrome: buildRegFile("chrome", managedStorage),
     reg_edge: buildRegFile("edge", managedStorage),
+    gpo_script: buildGpoScript(managedStorage),
     intune_variables: buildIntuneVariables(policy, input.branding, urls),
     cipp_fields: buildCippFields(policy, input.branding, urls),
     warnings,
