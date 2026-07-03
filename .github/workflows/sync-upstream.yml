@@ -14,8 +14,19 @@ name: Sync upstream
 # Note: pushes made with the workflow token do not trigger this copy's own
 # GitHub Actions CI, but the Cloudflare Workers Builds app still receives
 # the push and deploys.
+# Deploy-button copies start as a single squashed import with no shared git
+# history, so the first sync cannot merge. The first run detects this and
+# explains; rerunning with "Adopt upstream history" checked performs a
+# one-time graft: your current main is saved to a backup branch, upstream
+# history becomes main with your wrangler.jsonc kept on top, and every later
+# sync is a normal small merge.
 on:
   workflow_dispatch:
+    inputs:
+      graft:
+        description: "Adopt upstream history (one-time; keeps your wrangler.jsonc, backs up current main)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -41,6 +52,27 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream "$UPSTREAM_URL"
           git fetch upstream main
+
+          if ! git merge-base HEAD upstream/main >/dev/null 2>&1; then
+            if [ "${{ inputs.graft }}" != "true" ]; then
+              echo "result=needs-graft" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            BACKUP="backup-pre-sync-${GITHUB_RUN_NUMBER}"
+            git branch "$BACKUP"
+            git push origin "$BACKUP"
+            git checkout -b grafted upstream/main
+            git checkout "origin/${GITHUB_REF_NAME}" -- wrangler.jsonc
+            if ! git diff --cached --quiet; then
+              git commit -m "Reapply local wrangler.jsonc after adopting upstream history"
+            fi
+            git diff --name-only "origin/${GITHUB_REF_NAME}" HEAD > /tmp/graft-overwritten.txt
+            git push --force origin "grafted:${GITHUB_REF_NAME}"
+            echo "result=grafted" >> "$GITHUB_OUTPUT"
+            echo "backup=$BACKUP" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           BEFORE="$(git rev-parse HEAD)"
           if git merge --no-edit upstream/main; then
             if [ "$(git rev-parse HEAD)" = "$BEFORE" ]; then
@@ -88,4 +120,34 @@ jobs:
             up-to-date) echo "Already up to date with upstream." >> "$GITHUB_STEP_SUMMARY" ;;
             merged) echo "Upstream merged cleanly and pushed. Workers Builds will redeploy." >> "$GITHUB_STEP_SUMMARY" ;;
             conflict) echo "Conflicts found. See the upstream-sync pull request." >> "$GITHUB_STEP_SUMMARY" ;;
+            needs-graft)
+              {
+                echo "## One-time step required"
+                echo ""
+                echo "This copy started as a snapshot import, so it shares no git"
+                echo "history with upstream and cannot merge yet. Rerun this workflow"
+                echo "with **Adopt upstream history** checked. That will:"
+                echo ""
+                echo "- save your current main to a backup branch"
+                echo "- make upstream history your main, keeping your wrangler.jsonc"
+                echo "- overwrite any other files you changed (the run lists them)"
+                echo ""
+                echo "Every later sync is then a normal merge."
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            grafted)
+              {
+                echo "## Upstream history adopted"
+                echo ""
+                echo "Your previous main is saved on branch ${{ steps.merge.outputs.backup }}."
+                echo "Your wrangler.jsonc was kept. Files that changed relative to your"
+                echo "previous main (upstream updates plus anything overwritten):"
+                echo ""
+                echo '```'
+                cat /tmp/graft-overwritten.txt
+                echo '```'
+                echo ""
+                echo "Workers Builds will redeploy from the new main."
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
           esac

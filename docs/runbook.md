@@ -155,6 +155,14 @@ How you update depends on how you deployed:
   workflow's own push does not re-trigger your copy's GitHub Actions CI,
   but Workers Builds still receives it and deploys.
 
+  First run only: deploy-button copies start as a snapshot import with no
+  shared git history, so the first sync reports that a one-time step is
+  needed. Rerun the workflow with **Adopt upstream history** checked: your
+  current main is saved to a backup branch, upstream history becomes main
+  with your `wrangler.jsonc` kept, and every later sync is a normal merge.
+  If you customized files other than `wrangler.jsonc`, restore them from
+  the backup branch afterward.
+
 - **Deploy button, manually.** Same result from a clone of your copy:
 
   ```
