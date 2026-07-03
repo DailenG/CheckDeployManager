@@ -95,13 +95,21 @@ tenant's next artifact with no republish.
 
 **Field classification:**
 
-- Inheritable branding: `product_name`, `support_email`, `support_url`,
-  `privacy_policy_url`, `about_url`, `primary_color`.
+- Inheritable branding: everything, including `company_name` and the logo.
+  Branding is the security entity's brand as end users see it in the
+  extension; for a white-label MSP that is the MSP's own name and logo on
+  every client (brand recognition is the point), while a client that wants
+  its own brand simply overrides. Note `tenants.name` is the internal
+  dashboard label, unrelated to branding and never inherited.
+- Logo mechanics: artifacts already emit `/assets/{guid}/logo`, so the
+  asset route falls back to a new instance-level default logo when the
+  tenant has none. Per-tenant URLs stay stable while content inherits; no
+  artifact shape change.
 - Inheritable policy: `updateInterval`, `enablePageBlocking`,
   `showNotifications`, `enableValidPageBadge`, `validPageBadgeTimeout`,
   `enableCippReporting`, `urlAllowlist`, `domainSquatting`,
   `genericWebhook` events toggle.
-- Never inherited (identity): `company_name`, logo, `cippTenantId`.
+- Never inherited: `cippTenantId` (maps the client to its CIPP tenant).
   `default_cipp_server_url` keeps its existing dedicated setting.
 
 **Mechanics:**
