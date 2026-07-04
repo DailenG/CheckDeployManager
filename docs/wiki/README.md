@@ -1,146 +1,106 @@
 <!-- GENERATED FILE, do not edit by hand.
-     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit 0730976.
+     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit c6c9201.
      Regenerate: node .gitnexus/run.cjs wiki, then: npm run docs:wiki -->
 
 # CheckDeployManager
 
-> Generated from the GitNexus code knowledge graph at commit `0730976`.
+> Generated from the GitNexus code knowledge graph at commit `c6c9201`.
 > Do not edit these pages by hand. To refresh after code changes, run
 > `node .gitnexus/run.cjs analyze`, `node .gitnexus/run.cjs wiki`, then `npm run docs:wiki`.
 
 
-CheckDeployManager is a multi-tenant configuration service for the Check by CyberDrain browser extension. It runs on Cloudflare Workers and gives MSPs a central place to mirror upstream Check detection rules, apply tenant-specific configuration, publish deployable rulesets, and manage browser deployment assets.
+CheckDeployManager is a multi-tenant configuration service for the Check by CyberDrain browser extension. It runs on Cloudflare Workers and gives MSPs a central place to manage Check rules, tenant-specific overrides, deployment artifacts, webhook intake, branding, audit history, and upstream rule synchronization.
 
-The service is intentionally small and Cloudflare-native: the Worker handles HTTP and scheduled jobs, D1 stores tenant and operational metadata, R2 stores published ruleset artifacts, and Cloudflare Access protects the operator-facing surfaces.
+The project is designed around a small Cloudflare-native runtime: a Worker built with Hono, D1 for metadata, R2 for published ruleset artifacts, and a dependency-free management UI served from the same application. A new developer should start with the [Application Runtime](application-runtime.md), then follow the request paths into the [Operator API](operator-api.md), [Public Rules Delivery](public-rules-delivery.md), and the core publishing and sync modules.
 
 ```mermaid
 flowchart TD
-  Worker[Application Runtime<br/>Cloudflare Worker + Hono]
-  UI[Management UI]
-  API[Operator API]
-  Public[Public Rules Delivery]
-  Auth[Authentication & Authorization]
-  DB[Data Model & Persistence<br/>D1]
-  R2[Published Artifacts<br/>R2]
-  Merge[Ruleset Validation & Merge]
-  Sync[Upstream Sync & Retention]
-  Audit[Audit & Webhooks]
+  Runtime[Application Runtime] --> Auth[Authentication & Authorization]
+  Runtime --> API[Operator API]
+  Runtime --> Public[Public Rules Delivery]
+  Runtime --> Sync[Upstream Sync & Retention]
 
-  Worker --> UI
-  Worker --> API
-  Worker --> Public
-  Worker --> Sync
+  UI[Management UI] --> API
+  API --> Publish[Publishing & Artifacts]
+  API --> Data[Data Model & Persistence]
+  API --> Audit[Audit & Webhooks]
 
-  API --> Auth
-  API --> DB
-  API --> Merge
-  API --> R2
-  API --> Audit
-
-  Public --> DB
-  Public --> R2
-
-  Sync --> DB
-  Sync --> Merge
-  Sync --> R2
-  Sync --> Audit
-
-  Audit --> DB
+  Sync --> Publish
+  Publish --> Merge[Ruleset Validation & Merge]
+  Publish --> Data
+  Public --> Data
 ```
 
 ## What The Service Does
 
-At its core, CheckDeployManager is a rules host and tenant configuration manager.
+At a high level, CheckDeployManager mirrors the upstream CyberDrain Check ruleset, lets operators layer MSP-wide and tenant-specific changes on top of it, then publishes stable tenant rulesets for the browser extension to consume.
 
-It mirrors the upstream CyberDrain ruleset, validates it, snapshots it, and republishes tenant-specific rules when the upstream source changes. Tenant deltas are validated and merged through [Ruleset Validation & Merge](ruleset-validation-merge.md), then published by [Publishing & Artifacts](publishing-artifacts.md) into versioned R2 objects with metadata recorded in D1.
+Operators use the [Management UI](management-ui.md), a vanilla JavaScript dashboard under `src/ui/manage/`, to create tenants, edit deltas, publish rulesets, configure branding, inspect webhooks, view audit events, and manage instance settings. The UI talks to authenticated routes in the [Operator API](operator-api.md), which is composed in `src/routes/api/index.ts`.
 
-Operators manage tenants through the [Management UI](management-ui.md), which talks to the authenticated [Operator API](operator-api.md). Public browser clients do not use operator auth; they fetch published rules, previews, and tenant branding through [Public Rules Delivery](public-rules-delivery.md) using unguessable GUIDs or preview tokens.
+Public browser extension traffic does not use operator authentication. Instead, [Public Rules Delivery](public-rules-delivery.md) exposes unauthenticated rules, draft preview, and logo routes guarded by unguessable GUIDs or preview tokens. Those routes are intentionally narrow and return bare `404` responses for misses.
 
-## Runtime Shape
+The service keeps upstream rules current through [Upstream Sync & Retention](upstream-sync-retention.md). Scheduled Worker execution calls `runScheduledTasks()` in `src/lib/cron.ts`, which syncs upstream rules through `src/lib/upstream.ts`, records snapshots, republishes affected tenants, writes audit entries, and prunes older operational data.
 
-The Worker entry point and route registration live in [Application Runtime](application-runtime.md). `src/index.ts` composes the Hono application, wires public routes, protected API routes, the management UI, and scheduled tasks. Shared runtime types and middleware are defined in `src/types.ts` and `src/middleware.ts`.
+## How The Code Is Organized
 
-Protected management requests pass through [Authentication & Authorization](authentication-authorization.md), where `requireOperator()` calls `authenticateRequest()` to validate Cloudflare Access JWTs. The service is fail-closed outside local development: if Access is not configured or the request does not carry a valid assertion, protected routes are rejected.
+The Worker entry point is `src/index.ts`, covered in [Application Runtime](application-runtime.md). It wires together the Hono app, public routes, management routes, API routes, static UI assets, and the scheduled handler. Shared Worker bindings and environment types live in `src/types.ts`, while `src/middleware.ts` provides the authenticated operator boundary.
 
-Persistent state is centralized in [Data Model & Persistence](data-model-persistence.md). The D1 schema lives in `migrations/0001_init.sql`, while `src/lib/db.ts` provides typed helpers for IDs, timestamps, hashes, instance settings, tenants, snapshots, publishing records, webhook events, and audit data.
+Authentication is handled by [Authentication & Authorization](authentication-authorization.md). The important path is `requireOperator()` calling `authenticateRequest()` in `src/lib/access-jwt.ts`. The production behavior is fail-closed: Cloudflare Access must be configured and requests must carry a valid Access JWT.
+
+Most persistent state flows through [Data Model & Persistence](data-model-persistence.md). The D1 schema starts in `migrations/0001_init.sql`, while `src/lib/db.ts` centralizes typed rows, default settings, ID generation, token and hash helpers, and reusable queries. Operator routes, public routes, publishing, upstream sync, audit logging, webhook intake, cleanup, and tests all depend on this layer.
+
+Ruleset correctness is concentrated in [Ruleset Validation & Merge](ruleset-validation-merge.md). `src/lib/validate.ts` validates upstream rulesets and tenant deltas, and `src/lib/merge.ts` applies validated deltas to upstream snapshots. This keeps publishing deterministic and testable without requiring the rest of the application to understand the full Check ruleset structure.
+
+[Publishing & Artifacts](publishing-artifacts.md) turns tenant configuration into deployable outputs. `src/lib/publish.ts` validates and publishes tenant ruleset versions, storing artifacts in R2 and recording metadata in D1. `src/lib/artifacts.ts` renders browser deployment artifacts from current database state on demand.
+
+[Audit & Webhooks](audit-webhooks.md) provides the persistence surfaces for operator/system activity and tenant webhook events. `writeAudit()` in `src/lib/audit.ts` is the central audit writer, and `src/routes/hook.ts` accepts tenant webhook payloads at `POST /hook/:guid`.
 
 ## Key End-To-End Flows
 
 ### Operator Management Flow
 
-An operator opens the management dashboard from the Worker, signs in through Cloudflare Access, and uses the UI to manage tenants, drafts, publishing, settings, branding, events, and audit records.
+A signed-in operator opens the management dashboard from `/manage`. The [Management UI](management-ui.md) renders the current hash route, calls the [Operator API](operator-api.md), and relies on `requireOperator()` to enforce the [Authentication & Authorization](authentication-authorization.md) boundary.
 
-The request path is:
-
-```text
-Management UI -> Operator API -> requireOperator -> D1 / publishing / audit helpers
-```
-
-Most administrative work flows through the [Operator API](operator-api.md), which uses [Data Model & Persistence](data-model-persistence.md) heavily and writes audit records through [Audit & Webhooks](audit-webhooks.md).
+From there, API handlers read and write D1 through [Data Model & Persistence](data-model-persistence.md). Actions such as creating tenants, changing settings, publishing rules, rotating GUIDs, or reviewing webhook data are recorded through [Audit & Webhooks](audit-webhooks.md).
 
 ### Rules Publishing Flow
 
-Tenant rules start as a delta document. The system validates the delta, combines it with the active upstream snapshot, stores the published ruleset in R2, records the published version in D1, and logs the action.
+Publishing starts with tenant configuration and a delta document submitted through the [Operator API](operator-api.md). The API delegates to [Publishing & Artifacts](publishing-artifacts.md), which loads the active upstream snapshot, validates the tenant delta through [Ruleset Validation & Merge](ruleset-validation-merge.md), builds the merged ruleset, stores the published artifact, and records the new version in [Data Model & Persistence](data-model-persistence.md).
 
-```text
-Tenant delta -> validation -> merge with upstream -> R2 artifact -> D1 publish record -> audit log
-```
-
-The important modules for this path are [Ruleset Validation & Merge](ruleset-validation-merge.md), [Publishing & Artifacts](publishing-artifacts.md), [Data Model & Persistence](data-model-persistence.md), and [Audit & Webhooks](audit-webhooks.md).
-
-### Public Delivery Flow
-
-Browser clients fetch published rulesets and deployment assets without an operator session. Access is controlled by tenant GUIDs and preview tokens, not user login state.
-
-```text
-Browser extension -> Public Rules Delivery -> D1 lookup -> R2 ruleset or generated artifact
-```
-
-Misses intentionally return the same bare `404` shape so callers cannot infer whether a tenant, file, or token exists.
+Once published, browser clients fetch the tenant ruleset through [Public Rules Delivery](public-rules-delivery.md), not through the authenticated operator API.
 
 ### Scheduled Upstream Sync Flow
 
-The Worker scheduled handler runs daily maintenance. It fetches the upstream ruleset, validates it, snapshots accepted or invalid payloads, republishes tenant rules when needed, writes audit entries, and prunes old operational data.
+Cloudflare invokes the Worker scheduled handler in `src/index.ts`. That enters [Upstream Sync & Retention](upstream-sync-retention.md), where `runScheduledTasks()` calls `syncUpstream()`. The sync path fetches the upstream Check ruleset, validates it, snapshots the result, compares it with the active version, republishes tenant rules when needed, writes audit records, and performs retention cleanup.
 
-```text
-scheduled handler -> runScheduledTasks -> syncUpstream -> validate -> publish affected tenants -> audit
-```
+This path connects the application runtime, upstream sync, publishing, validation, audit logging, and persistence layers.
 
-This behavior is documented in [Upstream Sync & Retention](upstream-sync-retention.md), with persistence handled by [Data Model & Persistence](data-model-persistence.md).
+### Public Extension Delivery Flow
 
-### Webhook Intake Flow
+The Check browser extension requests tenant rules or branding assets through public routes in `src/routes/rules.ts`. [Public Rules Delivery](public-rules-delivery.md) looks up the requested tenant or artifact in [Data Model & Persistence](data-model-persistence.md), serves the published object, and uses intentionally minimal responses for missing or invalid requests.
 
-Tenants can send webhook payloads to `POST /hook/:guid`. Accepted JSON payloads are stored in D1 for later review by operators.
-
-```text
-Tenant webhook -> hook route -> D1 webhook_events
-```
-
-Webhook storage and audit logging are covered in [Audit & Webhooks](audit-webhooks.md).
+This separation keeps operator management and public extension delivery independent: operators authenticate with Cloudflare Access, while extension-facing routes use stable tenant identifiers and tokens.
 
 ## Local Development
 
-Install dependencies, then use the project scripts from the repository root:
+Install dependencies and run the Worker locally:
 
 ```bash
 npm install
-npm run migrate:local
 npm run dev
 ```
 
-Useful validation commands:
+Useful scripts:
 
 ```bash
-npm run test
+npm test
 npm run typecheck
+npm run migrate:local
+npm run deploy
 npm run docs:wiki
 ```
 
-Deployment is handled with:
-
-```bash
-npm run deploy
-```
+Use `npm run dev` for local Worker development, `npm run test` and `npm run typecheck` before changes are merged, `npm run migrate:local` when working with the D1 schema locally, and `npm run docs:wiki` when regenerating the repository wiki documentation.
 
 ## Module pages
 

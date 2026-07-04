@@ -77,6 +77,10 @@ Current work queue, in order. Update as items land.
       suppression of baseline indicators, duplicate-id gate, end-to-end
       publish/preview/republish, duplicate isolation).
 
+- [x] v0.4.0 release (tenant defaults with inheritance, baseline rules
+      delta with fleet republish, tenant duplicate, wizard defaults step,
+      refreshed docs and screenshots)
+
 Queue complete.
 
 The numbered sections below are scoped and ready to start, in priority
