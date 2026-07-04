@@ -18,12 +18,10 @@ All screenshots show a local instance seeded with the project's fictional sample
 
 | | |
 |---|---|
-| ![Per-tenant deployment artifacts: managed storage JSON, reg files, Intune variables, CIPP fields](docs/screenshots/tenant-artifacts.png) | ![Rules draft editor with validation and one-click publish](docs/screenshots/tenant-rules.png) |
+| ![Per-tenant deployment artifacts: managed storage JSON, reg files, GPO script, Intune variables, CIPP fields](docs/screenshots/tenant-artifacts.png) | ![Rules draft editor with validation and one-click publish](docs/screenshots/tenant-rules.png) |
+| ![Tenant branding with inherited instance defaults](docs/screenshots/tenant-branding.png) | ![Tenant policy with inherited-field badges](docs/screenshots/tenant-policy.png) |
+| ![Tenant defaults editor: branding, default logo, policy defaults](docs/screenshots/settings-tenant-defaults.png) | ![First-login setup wizard with live step state](docs/screenshots/setup-wizard.png) |
 | ![Upstream sync status and snapshot history](docs/screenshots/upstream.png) | ![Audit log with per-action detail](docs/screenshots/audit.png) |
-
-| | |
-|---|---|
-| ![First-login setup wizard with live step state](docs/screenshots/setup-wizard.png) | ![Tenant branding for white-label deployments](docs/screenshots/tenant-branding.png) |
 
 ## Architecture
 

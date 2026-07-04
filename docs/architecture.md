@@ -141,7 +141,12 @@ CREATE TABLE instance_settings (
     value TEXT NOT NULL
     -- public_base_url, default_cipp_server_url, metrics_retention_days (7),
     -- webhook_retention_days (90), stale_fetch_hours (48),
-    -- upstream_source_url, upstream_keep_snapshots (10)
+    -- upstream_source_url, upstream_keep_snapshots (10),
+    -- version_suffix_label (cdm), false_positive_relay_url,
+    -- onboarding_completed_at (setup wizard stamp),
+    -- tenant_defaults (JSON {branding, policy} every tenant inherits),
+    -- baseline_rule_delta (instance delta merged beneath tenant deltas),
+    -- default_logo_r2_key / default_logo_content_type (instance default logo)
 );
 
 CREATE TABLE upstream_snapshots (
@@ -196,9 +201,10 @@ Free tier fit: ~3,000 endpoints at 1 fetch/day produces roughly 6k D1 row writes
 ### 2.2 R2 object layout
 
 ```
-upstream/{iso-ts}-{hash12}.json        mirrored CyberDrain base snapshots (keep last N, default 10)
-rules/{tenant_id}/{version}.json       immutable published artifacts, one per publish
-assets/{tenant_id}/logo.{png|jpg|svg}  tenant logo (48x48 recommended, 128x128 max, per Check docs)
+upstream/{iso-ts}-{hash12}.json           mirrored CyberDrain base snapshots (keep last N, default 10)
+rules/{tenant_id}/{version}.json          immutable published artifacts, one per publish
+assets/{tenant_id}/logo.{png|jpg|svg}     tenant logo (48x48 recommended, 128x128 max, per Check docs)
+assets/instance-default/logo.{png|jpg|svg} instance default logo, served for tenants without their own
 ```
 
 The bucket is private. Everything is served through the Worker so revocation, metrics, and headers stay in one place.
@@ -222,6 +228,12 @@ The tenant never edits the full ruleset. The delta is small, auditable, and surv
 
 Merge semantics: arrays append onto the upstream section, `suppress_indicator_ids` removes upstream indicators by id, `raw_overrides` deep-merges last for escape-hatch cases. The merged output keeps the upstream `version` with a tenant suffix (`1.2.3+msp.7`) and stamps `lastUpdated` at publish time.
 
+An optional instance-level **baseline delta** (`instance_settings.baseline_rule_delta`, same document shape) applies beneath every tenant delta: upstream rules, then the baseline, then the tenant delta. Standard MSP exclusions (RMM domains and similar) live there once instead of in every tenant. A tenant can suppress a baseline-added indicator; a duplicate indicator id between the two layers fails the validation gates.
+
+### 2.3b Tenant defaults (instance-level inheritance)
+
+`instance_settings.tenant_defaults` holds a JSON object `{branding: {...}, policy: {...}}` resolved at artifact generation time, never copied into tenant rows: a tenant value present wins, else the default, else the hardcoded fallback. Branding inherits per field when the tenant value is the empty string; policy inherits per key when absent from the tenant's `settings_json`. `cippTenantId`, `cippServerUrl` (which has its own dedicated default setting), and `enableDebugLogging` never inherit. The instance default logo is served through each tenant's stable `/assets/{guid}/logo` URL whenever the tenant has no logo of its own.
+
 ### 2.4 Validation gates (run on every publish and every upstream sync)
 
 1. JSON parses; body under 1 MB.
@@ -242,7 +254,7 @@ A failed gate blocks publish (operator sees the errors) or, on cron, keeps the l
 |---|---|---|
 | `/rules/{guid}.json` | GET, HEAD | Resolve GUID (active) -> stream published artifact from R2 |
 | `/preview/{token}.json` | GET | Serve the tenant draft merged live against the active upstream snapshot; `Cache-Control: no-store` |
-| `/assets/{guid}/logo` | GET | Tenant logo from R2; `Cache-Control: public, max-age=86400`; correct image content type |
+| `/assets/{guid}/logo` | GET | Tenant logo from R2, falling back to the instance default logo when the tenant has none; `Cache-Control: public, max-age=86400`; correct image content type |
 | `/hook/{guid}` | POST | Webhook receiver; requires `Content-Type: application/json`, body under 256 KB; stores event; returns 200 `{"received":true}` |
 
 Rules response contract:
@@ -279,8 +291,12 @@ Static dashboard at `/manage` (dark mode default). JSON API under `/api`:
 | `/api/tenants/{id}/policy` | GET, PUT | Managed-schema toggles (2.1 settings_json) |
 | `/api/tenants/{id}/artifacts` | GET | Generated policy outputs (section 5), rendered fresh |
 | `/api/tenants/{id}/guids` | GET, POST | List / rotate (mint new active GUID) |
+| `/api/tenants/{id}/duplicate` | POST | New tenant carrying only the source's rules delta draft (branding and policy inherit tenant defaults) |
 | `/api/guids/{guid}/revoke` | POST | Immediate 404 for that GUID, audit |
-| `/api/instance/settings` | GET, PUT | Instance settings incl. default CIPP server URL, retention, base URL |
+| `/api/instance/status` | GET | Aggregate first-run status for the setup wizard; running version |
+| `/api/instance/settings` | GET, PUT | Instance settings incl. default CIPP server URL, retention, base URL, tenant_defaults and baseline_rule_delta (both validated on write) |
+| `/api/instance/default-logo` | GET, PUT, DELETE | Instance default logo (multipart upload, same constraints as the tenant logo) |
+| `/api/instance/republish` | POST | Re-merge and republish every tenant with a published version using its frozen delta (rolls a baseline change out immediately) |
 | `/api/upstream` | GET, POST | Snapshot status and diff history; POST forces a sync now |
 | `/api/events` | GET, PATCH | Webhook inbox; disposition new/reviewed/dismissed |
 | `/api/audit` | GET | Audit log, filterable by tenant/operator/action |
@@ -302,7 +318,7 @@ The public endpoints (`/rules`, `/preview`, `/assets`, `/hook`) are intentionall
 
 ## 5. Policy Generator Specification
 
-Generated per tenant from D1 state, always current, shown in the dashboard with copy buttons and file downloads. Fictional sample tenant throughout:
+Generated per tenant from D1 state, always current, shown in the dashboard with copy buttons and file downloads. Branding and policy values resolve through the tenant defaults layer (section 2.3b) at render time, so a defaults change reaches every non-overridden tenant's next artifact with no republish. Fictional sample tenant throughout:
 
 - Tenant: **Harborview Physical Therapy** (client of the MSP)
 - GUID: `f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34`
@@ -522,18 +538,27 @@ CheckDeployManager/
       api/                   management API modules per resource
     lib/
       access-jwt.ts          Access JWT validation (JWKS cache, aud check)
-      merge.ts               delta merge engine
+      merge.ts               delta merge engine (applyDelta layering + version stamping)
       validate.ts            validation gates (section 2.4)
       artifacts.ts           policy generator renderers (section 5)
+      tenant-defaults.ts     instance-level defaults parsing (section 2.3b)
+      publish.ts             merge + gates + immutable version writes, fleet republish
       upstream.ts            cron sync + diffing
-      db.ts                  D1 helpers
+      relay.ts               false positive webhook relay
+      cron.ts                scheduled handler (sync + retention)
+      db.ts                  D1 helpers, instance settings defaults
       audit.ts
     ui/                      static dashboard assets (dark default), served via assets binding
   test/
     merge.test.ts
     validate.test.ts
-    artifacts.test.ts
+    artifacts.test.ts        golden files under test/golden/
     rules-endpoint.test.ts
+    api.test.ts
+    upstream.test.ts
+    cron.test.ts
+    relay.test.ts
+    access-jwt.test.ts
 ```
 
 Repo hygiene rules (enforced in CONTRIBUTING and CI lint): no secrets, no tokens, no client names, no real GUIDs anywhere in the repo; samples use fictional tenants only. All tenant data lives exclusively in the deployer's D1 and R2.

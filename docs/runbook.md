@@ -95,8 +95,9 @@ Once the custom domain serves, two follow-ups:
 ## 2. First-run configuration
 
 On a fresh instance the dashboard redirects your first visit to a **setup
-wizard** (`#/setup`) covering steps 2 through 4 below: instance settings,
-the first upstream sync, and tenant zero with a published ruleset. Each
+wizard** (`#/setup`) covering steps 2 through 5 below: instance settings,
+an optional standard-branding-defaults step, the first upstream sync, and
+tenant zero with a published ruleset. Each
 step's badge derives from live server state, so the wizard is resumable
 (close the tab, come back, nothing is lost) and safe with several operators
 working at once. **Skip for now** dismisses it permanently, as does
@@ -104,6 +105,8 @@ finishing it; either writes the `onboarding_completed_at` instance setting.
 The top navigation stays fully usable throughout, and instances that
 predate the wizard never see it. The manual steps below remain the
 reference for what the wizard automates.
+
+![Setup wizard: six steps with live state badges](screenshots/setup-wizard.png)
 
 1. Open `https://<your-hostname>/manage` and authenticate via OTP.
 2. Go to **Settings** (in the dashboard's own top navigation, not the Cloudflare dashboard) and configure:
@@ -167,6 +170,15 @@ The setup wizard offers a small optional "Standard branding defaults" step
 (company name, product name, support email and URL) that writes the same
 setting; the full editor stays on the Settings page.
 
+![Tenant defaults editor on the Settings page: branding defaults, default logo, tri-state policy defaults](screenshots/settings-tenant-defaults.png)
+
+On the tenant tabs, inherited fields are marked and show the inherited
+value, so an override is always distinguishable from a default:
+
+![Tenant branding tab with inherited placeholders and the inherited default logo](screenshots/tenant-branding.png)
+
+![Tenant policy tab with inherited-field badges](screenshots/tenant-policy.png)
+
 ### Baseline rules delta
 
 The **Baseline rules delta** panel on the Settings page holds an
@@ -184,6 +196,8 @@ into each tenant's delta.
   the editor) re-merges and republishes every tenant with a published
   version immediately, using the delta frozen in its current version --
   never unpublished drafts. Failures land in the audit log per tenant.
+
+![Baseline rules delta editor with the Republish all tenants action](screenshots/settings-baseline-delta.png)
 
 ### Duplicating a tenant
 

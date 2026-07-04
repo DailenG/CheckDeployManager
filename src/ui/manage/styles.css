@@ -149,6 +149,9 @@ textarea.tall { min-height: 260px; }
 
 label.field { display: block; margin-bottom: 12px; }
 label.field span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px; }
+/* The label selector above outweighs .badge's inline-block; restore it so
+   inherited hints sit inline after the label text instead of stretching. */
+label.field span .badge { display: inline-block; margin-left: 6px; }
 label.check { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 label.check input { width: auto; }
 
