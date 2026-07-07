@@ -12,7 +12,7 @@ The Deploy to Cloudflare flow asks for the following. Fields not listed here (pr
 | Build command | Leave blank; there is no build step |
 | Deploy command | `npm run deploy` (runs D1 migrations, then `wrangler deploy`) |
 | `ENVIRONMENT` (default `production`) | Keep `production`; `development` disables auth and is local-only |
-| Second `ENVIRONMENT` / `DEV_OPERATOR_EMAIL` | Sourced from `.dev.vars.example`; leave blank or remove. The flow stores this `ENVIRONMENT` as a remote secret either way, so the first build warns that the deploy replaces it with the config value `production` — expected, and gone on later builds |
+| Second `ENVIRONMENT` / `DEV_OPERATOR_EMAIL` | Sourced from `.dev.vars.example`; leave blank or remove. The flow stores this `ENVIRONMENT` as a remote secret either way, so the first build warns that the deploy replaces it with the config value `production`; expected, and gone on later builds |
 | `ACCESS_TEAM_DOMAIN` | Your Zero Trust team domain as a bare hostname (`<team>.cloudflareaccess.com`) if known, else any placeholder, corrected in 1.3 |
 | `ACCESS_APP_AUD` | Placeholder; the real AUD tag is created in 1.2 and set in 1.3 |
 
