@@ -332,10 +332,12 @@ async function renderTenantDetail(tenantId, tab) {
   const detail = await api(`/tenants/${tenantId}`);
   const tenant = detail.tenant;
 
-  const tabsHtml = TENANT_TABS.map(
-    ([key, label]) =>
-      `<a href="#/tenants/${esc(tenantId)}/${key}" class="${key === tab ? "active" : ""}">${esc(label)}</a>`,
-  ).join("");
+  const tabsHtml =
+    `<a href="#/tenants/${esc(tenantId)}/onboard">Onboard wizard</a>` +
+    TENANT_TABS.map(
+      ([key, label]) =>
+        `<a href="#/tenants/${esc(tenantId)}/${key}" class="${key === tab ? "active" : ""}">${esc(label)}</a>`,
+    ).join("");
 
   view.innerHTML = `
     <div class="row spread">
