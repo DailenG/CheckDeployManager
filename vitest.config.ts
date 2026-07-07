@@ -17,6 +17,11 @@ export default defineConfig({
           bindings: {
             TEST_MIGRATIONS: migrations,
             ENVIRONMENT: "production",
+            // Deploy-button copies carry real values in wrangler.jsonc vars;
+            // pin the unconfigured state so the fail-closed tests pass in
+            // every copy, not only in the upstream repo.
+            ACCESS_TEAM_DOMAIN: "",
+            ACCESS_APP_AUD: "",
           },
         },
       };

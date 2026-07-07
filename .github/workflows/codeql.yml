@@ -11,6 +11,10 @@ on:
 jobs:
   analyze:
     name: Analyze
+    # Code scanning uploads need GitHub Advanced Security, which private
+    # repos (deploy-button copies are private by recommendation) usually
+    # lack; skip rather than fail there.
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     permissions:
       security-events: write

@@ -55,9 +55,11 @@ jobs:
 
       # CONTRIBUTING rule 2: no real tenant GUIDs. Only the fictional
       # Harborview GUID and the all-zeros test UUID are allowed.
+      # wrangler.jsonc is exempt: deploy-button copies legitimately carry
+      # their provisioned D1 database_id there.
       - name: No unexpected UUIDs
         run: |
-          FOUND="$(git ls-files -z -- . ':(exclude)worker-configuration.d.ts' | xargs -0 grep -rhoIiE '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}' 2>/dev/null | sort -u \
+          FOUND="$(git ls-files -z -- . ':(exclude)worker-configuration.d.ts' ':(exclude)wrangler.jsonc' | xargs -0 grep -rhoIiE '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}' 2>/dev/null | sort -u \
             | grep -viE '^(f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34|00000000-0000-4000-8000-000000000000)$' || true)"
           if [ -n "$FOUND" ]; then
             echo "$FOUND"

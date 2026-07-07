@@ -275,6 +275,10 @@ Notes for either path:
   your copy's `wrangler.jsonc` so an update cannot lock you out.
 - If your copy has local changes, the merge may conflict; resolve in your
   copy, or keep customizations in separate files where possible.
+- Your copy runs the same CI as upstream and it is expected green: the
+  tests pin their own Access values, the hygiene UUID check exempts
+  `wrangler.jsonc` (your provisioned database id lives there), and CodeQL
+  skips itself on private repos, which lack code scanning entitlements.
 
 ### Upstream sync
 
