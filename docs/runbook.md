@@ -167,8 +167,9 @@ or re-run the CIPP standard. The logo is the exception: it is fetched live
 from the asset URL.
 
 The setup wizard offers a small optional "Standard branding defaults" step
-(company name, product name, support email and URL) that writes the same
-setting; the full editor stays on the Settings page.
+(company name, product name, support email and URL, primary color, and the
+default logo) that writes the same setting and logo; the full editor stays
+on the Settings page.
 
 ![Tenant defaults editor on the Settings page: branding defaults, default logo, tri-state policy defaults](screenshots/settings-tenant-defaults.png)
 

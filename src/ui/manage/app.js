@@ -1394,15 +1394,17 @@ async function renderSetup() {
   );
 
   const wizardDefaults = parseDefaultsSetting(settings.tenant_defaults || "");
-  const defaultsDone = Object.keys(wizardDefaults.branding).length > 0;
+  const hasDefaultLogo = (settings.default_logo_r2_key || "") !== "";
+  const defaultsDone =
+    Object.keys(wizardDefaults.branding).length > 0 || hasDefaultLogo;
   const stepDefaults = setupStep(
     3,
     "Standard branding defaults (optional)",
     defaultsDone ? "done" : "todo",
     `<p>Your standard support info, set once: every tenant inherits these
        values until it sets its own, so fleet-wide changes stay single-edit.
-       Skip freely; the full editor (logo, policy defaults) lives on the
-       Settings page.</p>
+       Skip freely; the full editor (privacy and about URLs, policy
+       defaults) lives on the Settings page.</p>
      <div class="grid2">
        <label class="field"><span>Company name</span>
          <input type="text" id="setup-td-company" value="${esc(wizardDefaults.branding.company_name || "")}"></label>
@@ -1412,7 +1414,16 @@ async function renderSetup() {
          <input type="text" id="setup-td-email" value="${esc(wizardDefaults.branding.support_email || "")}"></label>
        <label class="field"><span>Support URL</span>
          <input type="text" id="setup-td-support" value="${esc(wizardDefaults.branding.support_url || "")}"></label>
+       <label class="field"><span>Primary color</span>
+         <input type="text" id="setup-td-color" value="${esc(wizardDefaults.branding.primary_color || "")}"></label>
+       <label class="field"><span>Default logo (png, jpg, or svg; 512 KB max)</span>
+         <input type="file" id="setup-td-logo" accept="image/png,image/jpeg,image/svg+xml"></label>
      </div>
+     ${
+       hasDefaultLogo
+         ? `<img class="logo-preview" alt="Instance default logo" src="/api/instance/default-logo?ts=${Date.now()}">`
+         : ""
+     }
      <button id="setup-save-defaults" class="primary">Save defaults</button>`,
   );
 
@@ -1523,6 +1534,7 @@ async function renderSetup() {
         ["product_name", "setup-td-product"],
         ["support_email", "setup-td-email"],
         ["support_url", "setup-td-support"],
+        ["primary_color", "setup-td-color"],
       ];
       for (const [key, id] of fields) {
         const value = document.getElementById(id).value.trim();
@@ -1535,6 +1547,12 @@ async function renderSetup() {
           ? ""
           : JSON.stringify(merged);
       try {
+        const logoFile = document.getElementById("setup-td-logo").files[0];
+        if (logoFile) {
+          const form = new FormData();
+          form.set("logo", logoFile);
+          await api("/instance/default-logo", { method: "PUT", body: form });
+        }
         await api(
           "/instance/settings",
           jsonBody("PUT", { settings: { tenant_defaults: value } }),
