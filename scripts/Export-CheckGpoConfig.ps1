@@ -56,7 +56,14 @@ function Get-GpoKeyValues {
     $values = @{}
     foreach ($entry in $entries) {
         if ($null -ne $entry.PSObject.Properties['ValueName'] -and $null -ne $entry.ValueName) {
-            $values[$entry.ValueName] = $entry.Value
+            $value = $entry.Value
+            # REG_SZ values frequently come back with their trailing null
+            # terminator attached; strip nulls and stray whitespace so they
+            # never reach the exported JSON.
+            if ($value -is [string]) {
+                $value = $value.Trim([char]0).Trim()
+            }
+            $values[$entry.ValueName] = $value
         }
     }
     return $values

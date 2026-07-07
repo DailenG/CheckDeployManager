@@ -458,6 +458,47 @@ function domainToPattern(input, includeSubdomains) {
     : `^https://${escaped}(/.*)?$`;
 }
 
+/* Control characters (0-31, 127) plus the replacement character (65533),
+   spelled via charCode so no literal control bytes live in this file. */
+const JUNK_CHARS = new RegExp(
+  "[" +
+    String.fromCharCode(0) +
+    "-" +
+    String.fromCharCode(31) +
+    String.fromCharCode(127) +
+    String.fromCharCode(65533) +
+    "]",
+  "g",
+);
+
+/* Splits one-pattern-per-line input, stripping control characters and the
+   replacement character. Registry exports (the GPO migration tool, pasted
+   .reg values) carry trailing NUL terminators that render as an invisible
+   or replacement character and silently break pattern matching. */
+function patternLines(text) {
+  return text
+    .split("\n")
+    .map((line) => line.replace(JUNK_CHARS, "").trim())
+    .filter(Boolean);
+}
+
+/* Recursively strips the same junk from every string in an imported JSON
+   object (keys and values), so a dirty export cleans on adoption. */
+function cleanImportedValue(value) {
+  if (typeof value === "string") {
+    return value.replace(JUNK_CHARS, "").trim();
+  }
+  if (Array.isArray(value)) return value.map(cleanImportedValue);
+  if (value !== null && typeof value === "object") {
+    const cleaned = {};
+    for (const [key, entry] of Object.entries(value)) {
+      cleaned[cleanImportedValue(key)] = cleanImportedValue(entry);
+    }
+    return cleaned;
+  }
+  return value;
+}
+
 /* Strict-enough client parse: the delta must be a JSON object. */
 function parseDeltaText(text) {
   try {
@@ -988,11 +1029,7 @@ async function renderPolicyTab(container, tenantId) {
       enableDebugLogging: container.querySelector("#p-debug").checked,
       validPageBadgeTimeout: Number(container.querySelector("#p-badge-timeout").value) || 5,
       updateInterval: Number(container.querySelector("#p-interval").value) || 24,
-      urlAllowlist: container
-        .querySelector("#p-allowlist")
-        .value.split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean),
+      urlAllowlist: patternLines(container.querySelector("#p-allowlist").value),
       domainSquatting: {
         enabled: container.querySelector("#p-squat").checked,
         deviationThreshold: Number(container.querySelector("#p-squat-threshold").value) || 2,
@@ -1575,11 +1612,7 @@ async function renderSettings() {
     if (badgeTimeout !== "") policy.validPageBadgeTimeout = Number(badgeTimeout) || 5;
     const interval = document.getElementById("td-p-interval").value.trim();
     if (interval !== "") policy.updateInterval = Number(interval) || 24;
-    const allowlist = document
-      .getElementById("td-p-allowlist")
-      .value.split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
+    const allowlist = patternLines(document.getElementById("td-p-allowlist").value);
     if (allowlist.length > 0) policy.urlAllowlist = allowlist;
     const squatEnabled = readTriState("td-p-squat");
     if (squatEnabled !== undefined) {
@@ -2152,8 +2185,10 @@ async function renderTenantOnboard(tenantId) {
         (in the repo) on a domain controller; it asks for your existing GPO's
         name and prints JSON. Paste that here, or paste any
         <span class="mono">check-managed-storage.json</span>. Branding and
-        policy values are adopted into steps 2 and 3; the rules URL is
-        ignored, since this tenant's own config URL replaces it.</p>
+        policy values are adopted into steps 2 and 3 (re-adopting overwrites
+        them; pasted values are cleaned of stray registry control
+        characters); the rules URL is ignored, since this tenant's own
+        config URL replaces it.</p>
       <textarea id="ob-import" class="tall" spellcheck="false" placeholder="{ ... }"></textarea>
       <button id="ob-import-apply" class="primary" style="margin-top:8px">Adopt config</button>
     </details>
@@ -2316,15 +2351,11 @@ async function renderTenantOnboard(tenantId) {
       values (steps 2, 3, and 6). Statuses derive from live server state, so
       this wizard is resumable; leave and come back any time. Steps 2 and 4
       are optional.</p>
-    ${published ? "" : importPanel}
+    ${importPanel}
     ${step1}${step2}${step3}${step4}${step5}${step6}${step7}`;
 
   document.getElementById("ob-save-policy")?.addEventListener("click", async () => {
-    const lines = document
-      .getElementById("ob-allowlist")
-      .value.split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
+    const lines = patternLines(document.getElementById("ob-allowlist").value);
     const settings = { ...pol };
     if (JSON.stringify(lines) === JSON.stringify(defaultAllowlist)) {
       delete settings.urlAllowlist;
@@ -2398,6 +2429,9 @@ async function renderTenantOnboard(tenantId) {
       toast("Expected a JSON object in the managed-storage shape", true);
       return;
     }
+    // Registry exports carry trailing NUL terminators on strings; strip
+    // them (and any other control junk) before anything is saved.
+    parsed = cleanImportedValue(parsed);
     // Branding: customBranding camelCase keys onto tenant snake_case fields.
     const brandingMap = [
       ["companyName", "company_name"],
@@ -2439,6 +2473,11 @@ async function renderTenantOnboard(tenantId) {
         importedPolicy[key] = parsed[key];
         policyCount += 1;
       }
+    }
+    if (Array.isArray(importedPolicy.urlAllowlist)) {
+      importedPolicy.urlAllowlist = importedPolicy.urlAllowlist.filter(
+        (entry) => typeof entry === "string" && entry !== "",
+      );
     }
     const webhook = parsed.genericWebhook;
     if (webhook !== null && typeof webhook === "object" && !Array.isArray(webhook)) {
