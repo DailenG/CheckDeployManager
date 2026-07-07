@@ -99,6 +99,12 @@ Current work queue, in order. Update as items land.
 
 - [x] v0.6.0 release (tenant onboarding wizard, refreshed docs and wiki)
 
+- [x] v0.6.1: onboarding wizard copy pass (two-channel deployed/fetched
+      framing, conditional policy-essentials wording, optional badges,
+      deploy step completes with verify), plus GPO migration: a read-only
+      Export-CheckGpoConfig.ps1 for domain controllers and an adopt-config
+      panel in the wizard, with the import key set locked by a test.
+
 Queue complete.
 
 The numbered sections below are scoped and ready to start, in priority

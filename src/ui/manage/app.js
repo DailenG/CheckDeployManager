@@ -1674,12 +1674,16 @@ async function renderSettings() {
 /* ---------- setup wizard ---------- */
 
 function setupStep(number, title, state, body) {
+  // "optional" marks steps where skipping is a legitimate finished state;
+  // they must not nag with the amber "to do" of steps that block progress.
   const badge =
     state === "done"
       ? '<span class="badge good">done</span>'
       : state === "locked"
         ? '<span class="badge">waiting</span>'
-        : '<span class="badge accent">to do</span>';
+        : state === "optional"
+          ? '<span class="badge">optional</span>'
+          : '<span class="badge accent">to do</span>';
   return `<div class="panel">
     <div class="row spread"><h2>${number}. ${esc(title)}</h2>${badge}</div>
     ${state === "locked" ? '<p class="muted">Complete the previous step first.</p>' : body}
@@ -2137,21 +2141,43 @@ async function renderTenantOnboard(tenantId) {
 
   const fetched = detail.last_fetch_at !== null;
 
+  // Migration path for operators already running Check via the official
+  // GPO + ADMX: scripts/Export-CheckGpoConfig.ps1 reads their GPO on a DC
+  // and emits managed-storage-shaped JSON; pasting it here adopts the
+  // branding and policy values into this tenant (steps 2 and 3).
+  const importPanel = `<div class="panel">
+    <details>
+      <summary>Migrating from the official Check GPO? Import its config</summary>
+      <p class="muted">Run <span class="mono">scripts/Export-CheckGpoConfig.ps1</span>
+        (in the repo) on a domain controller; it asks for your existing GPO's
+        name and prints JSON. Paste that here, or paste any
+        <span class="mono">check-managed-storage.json</span>. Branding and
+        policy values are adopted into steps 2 and 3; the rules URL is
+        ignored, since this tenant's own config URL replaces it.</p>
+      <textarea id="ob-import" class="tall" spellcheck="false" placeholder="{ ... }"></textarea>
+      <button id="ob-import-apply" class="primary" style="margin-top:8px">Adopt config</button>
+    </details>
+  </div>`;
+
   const step1 = setupStep(
     1,
     "Tenant created",
     "done",
     `<p><strong>${esc(tenant.name)}</strong>, created ${esc(fmtTime(tenant.created_at))},
-      with its config GUID and preview token minted. Rename, duplicate, and
+      with its own config URL (the unguessable GUID in it is the access
+      control) and a preview URL for testing drafts. Rename, duplicate, and
       delete live on the <a href="#/tenants/${esc(tenantId)}">tenant page</a>.</p>`,
   );
 
   const step2 = setupStep(
     2,
     "Branding (optional)",
-    brandingOwn ? "done" : "todo",
-    `<p>What the extension shows this client's users. Blank fields inherit
-      the instance defaults, so skip freely if the defaults fit.</p>
+    brandingOwn ? "done" : "optional",
+    `<p>What the extension shows this client's users. It sits here, before
+      deployment, because branding is baked into the files step 6 generates;
+      the logo is the one exception, fetched live, so it can change later
+      without a re-push. Blank fields inherit the instance defaults, so skip
+      freely if the defaults fit.</p>
       <dl class="kv">${brandingRows}</dl>
       <p><a href="#/tenants/${esc(tenantId)}/branding">Open the Branding tab</a>
       to set client-specific values or upload a logo${
@@ -2163,8 +2189,18 @@ async function renderTenantOnboard(tenantId) {
     3,
     "Policy essentials",
     policyDone ? "done" : "todo",
-    `<p>The two settings that most often differ per client; everything else
-      lives on the <a href="#/tenants/${esc(tenantId)}/policy">Policy tab</a>.</p>
+    `<p><span class="badge accent">deployed with policy</span>
+      ${
+        cippOn
+          ? `The two settings that most often differ per client: the URL
+             allowlist and the CIPP tenant id.`
+          : `The setting that most often differs per client: the URL
+             allowlist (this client's own domains, training platforms).`
+      }
+      Like everything on the <a href="#/tenants/${esc(tenantId)}/policy">Policy
+      tab</a>, these ship inside the deployment files from step 6 and change
+      on devices only when that policy is re-pushed, so set them before
+      deploying.</p>
       <label class="field"><span>URL allowlist (one pattern per line${
         ownAllowlist === null && defaultAllowlist.length > 0 ? "; currently inherited" : ""
       })</span>
@@ -2182,9 +2218,12 @@ async function renderTenantOnboard(tenantId) {
   const step4 = setupStep(
     4,
     "Rules delta (optional)",
-    deltaKeyCount > 0 ? "done" : "todo",
-    `<p>Client-specific rule adjustments layered onto the upstream rules.
-      Most tenants need at most an exclusion for their own domains; skip
+    deltaKeyCount > 0 ? "done" : "optional",
+    `<p><span class="badge">fetched remotely</span>
+      Client-specific rule adjustments layered onto the upstream rules.
+      Unlike policy, browsers fetch rules from this service on their update
+      interval, so you can tune them any time, even after rollout. Most
+      tenants need at most an exclusion for their own domains; skip
       freely.</p>
       <div class="easy-add">
         <strong>Easy add</strong>
@@ -2215,9 +2254,10 @@ async function renderTenantOnboard(tenantId) {
       ? `<p>Version <strong>v${esc(detail.current_version.version_number)}</strong> is live
           at this tenant's config URL. Later changes republish from the
           <a href="#/tenants/${esc(tenantId)}/rules">Rules draft tab</a>.</p>`
-      : `<p>Merges the upstream rules with the baseline and this tenant's
-          delta, then serves the result at the tenant's config URL. Nothing
-          deploys to browsers yet; that is the next step.</p>
+      : `<p>Merges the upstream rules with the instance baseline delta (if
+          set) and this tenant's delta, then serves the result at the
+          tenant's config URL. Nothing deploys to browsers yet; that is the
+          next step.</p>
           <button id="ob-publish" class="primary">Publish</button>
           <div id="findings"></div>`,
   );
@@ -2243,7 +2283,7 @@ async function renderTenantOnboard(tenantId) {
   const step6 = setupStep(
     6,
     "Deploy to browsers",
-    published ? "todo" : "locked",
+    fetched ? "done" : published ? "todo" : "locked",
     deployBody,
   );
 
@@ -2256,9 +2296,10 @@ async function renderTenantOnboard(tenantId) {
           Onboarding is complete; day-to-day health lives on the
           <a href="#/tenants">tenant list</a> (Last fetch column) and in the
           monitoring guide.</p>`
-      : `<p>Point a test browser with the Check extension at the config URL
-          (or deploy to a pilot device) and wait for its first fetch; fetches
-          land within the update interval, immediately on a fresh install.</p>
+      : `<p>Deploy to a pilot device first (the config URL reaches the
+          extension through the policy you just deployed, not by visiting
+          it). A fresh install fetches immediately; browsers already running
+          fetch within the rules update interval, 24 hours by default.</p>
           <p>Last fetch: <strong>${esc(ago(detail.last_fetch_at))}</strong>
           <button id="ob-refresh" class="small">Check again</button></p>`,
   );
@@ -2268,8 +2309,14 @@ async function renderTenantOnboard(tenantId) {
       <h1>Onboarding: ${esc(tenant.name)}</h1>
       <a class="badge" href="#/tenants/${esc(tenantId)}">exit to tenant page</a>
     </div>
-    <p class="muted">Statuses derive from live server state, so this wizard is
-      resumable; leave and come back any time. Steps 2 through 4 are optional.</p>
+    <p class="muted">Everything here leaves this service by one of two doors:
+      detection rules are <strong>fetched</strong> by browsers from this
+      service (steps 4 and 5), while policy, branding, and the rules URL
+      itself are <strong>deployed</strong> to devices as files and registry
+      values (steps 2, 3, and 6). Statuses derive from live server state, so
+      this wizard is resumable; leave and come back any time. Steps 2 and 4
+      are optional.</p>
+    ${published ? "" : importPanel}
     ${step1}${step2}${step3}${step4}${step5}${step6}${step7}`;
 
   document.getElementById("ob-save-policy")?.addEventListener("click", async () => {
@@ -2338,6 +2385,88 @@ async function renderTenantOnboard(tenantId) {
   });
 
   document.getElementById("ob-refresh")?.addEventListener("click", () => route());
+
+  document.getElementById("ob-import-apply")?.addEventListener("click", async () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(document.getElementById("ob-import").value);
+    } catch (error) {
+      toast(`Not valid JSON: ${error.message}`, true);
+      return;
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      toast("Expected a JSON object in the managed-storage shape", true);
+      return;
+    }
+    // Branding: customBranding camelCase keys onto tenant snake_case fields.
+    const brandingMap = [
+      ["companyName", "company_name"],
+      ["productName", "product_name"],
+      ["supportEmail", "support_email"],
+      ["supportUrl", "support_url"],
+      ["privacyPolicyUrl", "privacy_policy_url"],
+      ["aboutUrl", "about_url"],
+      ["primaryColor", "primary_color"],
+    ];
+    const importedBranding = {};
+    const source = parsed.customBranding;
+    if (source !== null && typeof source === "object" && !Array.isArray(source)) {
+      for (const [from, to] of brandingMap) {
+        if (typeof source[from] === "string" && source[from] !== "") {
+          importedBranding[to] = source[from];
+        }
+      }
+    }
+    // Policy: whitelist of per-tenant keys; the webhook URL and rules URL
+    // are always this instance's own, so only the webhook prefs carry over.
+    const policyKeys = [
+      "updateInterval",
+      "enablePageBlocking",
+      "showNotifications",
+      "enableValidPageBadge",
+      "validPageBadgeTimeout",
+      "enableDebugLogging",
+      "urlAllowlist",
+      "domainSquatting",
+      "enableCippReporting",
+      "cippServerUrl",
+      "cippTenantId",
+    ];
+    const importedPolicy = { ...pol };
+    let policyCount = 0;
+    for (const key of policyKeys) {
+      if (parsed[key] !== undefined) {
+        importedPolicy[key] = parsed[key];
+        policyCount += 1;
+      }
+    }
+    const webhook = parsed.genericWebhook;
+    if (webhook !== null && typeof webhook === "object" && !Array.isArray(webhook)) {
+      importedPolicy.genericWebhook = {
+        enabled: webhook.enabled === true,
+        events: Array.isArray(webhook.events) ? webhook.events.map(String) : [],
+      };
+      policyCount += 1;
+    }
+    if (Object.keys(importedBranding).length === 0 && policyCount === 0) {
+      toast("Nothing recognizable to adopt in that JSON", true);
+      return;
+    }
+    try {
+      if (Object.keys(importedBranding).length > 0) {
+        await api(`/tenants/${tenantId}/branding`, jsonBody("PUT", importedBranding));
+      }
+      if (policyCount > 0) {
+        await api(`/tenants/${tenantId}/policy`, jsonBody("PUT", { settings: importedPolicy }));
+      }
+      toast(
+        `Adopted ${Object.keys(importedBranding).length} branding field(s) and ${policyCount} policy value(s)`,
+      );
+      route();
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
 
   const methodSelect = document.getElementById("ob-method");
   if (methodSelect && artifacts !== null) {

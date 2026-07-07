@@ -146,6 +146,25 @@ reference for what the wizard automates.
    serving pointer. Extensions pick it up within their update interval
    (24 h by default; `max-age` on the endpoint is 300 s).
 
+### Migrating a client from the official Check GPO
+
+For clients already running Check through a GPO built with Check's ADMX
+templates (or the .reg layout), the existing configuration can be adopted
+instead of retyped:
+
+1. On a domain controller or management host with RSAT, run
+   `scripts/Export-CheckGpoConfig.ps1` (from the repo). It asks for the
+   GPO's name, reads the Check policy values (Chrome hive, Edge fallback),
+   and prints managed-storage-shaped JSON, also saved to
+   `check-gpo-export.json`. Read-only; the GPO is never modified.
+2. In the dashboard: Tenants > **Onboard wizard** > expand **Migrating from
+   the official Check GPO?** > paste the JSON > **Adopt config**. Branding
+   and policy values land on the tenant; the old `customRulesUrl` is
+   ignored because the tenant's own config URL replaces it.
+3. Continue the wizard from step 4 (rules delta) onward. When the new
+   artifacts are deployed, retire the old GPO's Check values so the two do
+   not fight over the same registry keys.
+
 ### Rolling back
 
 Tenant > Versions > Roll back to this. The pointer moves to the selected immutable version instantly; the endpoint ETag reverts with it.

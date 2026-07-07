@@ -109,6 +109,32 @@ describe("tenants CRUD", () => {
       .run();
     const fetchedDetail = await (await api(`/api/tenants/${created.id}`)).json<any>();
     expect(fetchedDetail.last_fetch_at).toBe("2026-07-07T12:00:00.000Z");
+  });
+
+  it("accepts the full key set the GPO-export import path submits", async () => {
+    // The onboarding wizard's adopt-config panel whitelists exactly these
+    // keys from Export-CheckGpoConfig.ps1 output; every one must validate.
+    const created = await createTenantViaApi();
+    const imported = await api(
+      `/api/tenants/${created.id}/policy`,
+      jsonInit("PUT", {
+        settings: {
+          updateInterval: 12,
+          enablePageBlocking: true,
+          showNotifications: false,
+          enableValidPageBadge: true,
+          validPageBadgeTimeout: 8,
+          enableDebugLogging: false,
+          urlAllowlist: ["https://training.knowbe4.com/*"],
+          domainSquatting: { enabled: true, deviationThreshold: 2, Action: "block" },
+          genericWebhook: { enabled: true, events: ["page_blocked"] },
+          enableCippReporting: true,
+          cippServerUrl: "https://cipp.example.test",
+          cippTenantId: "harborviewpt.onmicrosoft.com",
+        },
+      }),
+    );
+    expect(imported.status).toBe(200);
 
     const rename = await api(
       `/api/tenants/${created.id}`,
