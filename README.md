@@ -98,6 +98,7 @@ The full runbook with verification steps lives in [docs/runbook.md](docs/runbook
 
 - [docs/architecture.md](docs/architecture.md): design, data model, endpoint contracts, threat model
 - [docs/runbook.md](docs/runbook.md): full post-deploy and operations runbook
+- [docs/monitoring.md](docs/monitoring.md): catching problematic setups with the dashboard's signals and Cloudflare's tools
 - [docs/wiki/](docs/wiki/README.md): code wiki generated from the GitNexus knowledge graph, one page per module (runtime, auth, data model, validation and merge, sync, publishing, audit, public delivery, API, UI)
 - [CONTRIBUTING.md](CONTRIBUTING.md): development workflow and repository rules
 - [SECURITY.md](SECURITY.md): threat model summary and disclosure contact

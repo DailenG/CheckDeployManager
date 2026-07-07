@@ -314,6 +314,11 @@ After bring-up or a significant change:
 
 ## 5. Troubleshooting
 
+For proactive signals (revoked GUIDs still in use, typo'd config URLs
+polling 404s, fleet-volume drops, Access denials), see the
+[monitoring guide](monitoring.md), which maps each symptom to the
+dashboard indicator or Cloudflare tool that catches it.
+
 Symptoms observed on real deployments, with causes and fixes:
 
 | Symptom | Cause | Fix |
