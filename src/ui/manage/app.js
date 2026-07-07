@@ -416,6 +416,23 @@ const DELTA_LIST_FIELDS = [
   ],
 ];
 
+/* Turns a domain (or pasted URL) into the anchored regex the rules engine
+   expects. Returns null when no plausible hostname can be extracted. */
+function domainToPattern(input, includeSubdomains) {
+  let host = input.trim().toLowerCase();
+  try {
+    if (host.includes("://")) host = new URL(host).hostname;
+  } catch {
+    return null;
+  }
+  host = host.replace(/^\*\./, "").replace(/[/?#].*$/, "").replace(/\.+$/, "");
+  if (!/^[a-z0-9][a-z0-9.-]*\.[a-z][a-z0-9-]*$/.test(host)) return null;
+  const escaped = host.replace(/\./g, "\\.");
+  return includeSubdomains
+    ? `^https://([^/]*\\.)?${escaped}(/.*)?$`
+    : `^https://${escaped}(/.*)?$`;
+}
+
 /* Strict-enough client parse: the delta must be a JSON object. */
 function parseDeltaText(text) {
   try {
@@ -470,6 +487,16 @@ async function renderRulesTab(container, tenantId, detail) {
         delta (Settings page) applies beneath all of it.</p>
       <div id="guided" ${mode === "raw" ? "hidden" : ""}>
         ${guidedFields}
+        <div class="row" style="align-items:center;flex-wrap:wrap">
+          <span class="muted">Easy add: build the regex from a domain</span>
+          <input type="text" id="pb-domain" placeholder="training.knowbe4.com or a full URL" style="flex:1;min-width:220px">
+          <label class="check"><input type="checkbox" id="pb-subs" checked> include subdomains</label>
+          <select id="pb-target">
+            <option value="add_exclusion_domain_patterns">as exclusion pattern</option>
+            <option value="add_trusted_login_patterns">as trusted login pattern</option>
+          </select>
+          <button id="pb-add" class="small">Add</button>
+        </div>
         <details id="advanced-block" ${hasAdvanced ? "open" : ""}>
           <summary>Advanced: added indicators and raw overrides (JSON:
             <span class="mono">add_phishing_indicators, raw_overrides</span>)</summary>
@@ -616,6 +643,29 @@ async function renderRulesTab(container, tenantId, detail) {
       }
     });
   }
+
+  el("pb-add").addEventListener("click", () => {
+    const pattern = domainToPattern(el("pb-domain").value, el("pb-subs").checked);
+    if (pattern === null) {
+      toast("Enter a domain like training.knowbe4.com (or paste a URL)", true);
+      return;
+    }
+    const target = el(`d-${el("pb-target").value}`);
+    const lines = target.value.split("\n").map((line) => line.trim()).filter(Boolean);
+    if (lines.includes(pattern)) {
+      toast("That pattern is already in the list", true);
+      return;
+    }
+    lines.push(pattern);
+    target.value = lines.join("\n");
+    // Reuse the input listener so the dirty flag and summary update.
+    target.dispatchEvent(new Event("input"));
+    el("pb-domain").value = "";
+    toast(`Added ${pattern}`);
+  });
+  el("pb-domain").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") el("pb-add").click();
+  });
 
   el("toggle-mode").addEventListener("click", () => {
     if (mode === "guided") {
@@ -855,6 +905,12 @@ async function renderPolicyTab(container, tenantId) {
 
   container.innerHTML = `
     <div class="panel">
+      <p class="muted"><span class="badge accent">deployed with policy</span>
+        Everything on this tab ships inside the deployment artifacts (reg
+        files, GPO script, RMM script, Intune variables, CIPP fields,
+        policies.json), not fetched from this service. Deployed browsers pick
+        up changes here only when that policy is re-pushed; the Rules draft
+        is the opposite, fetched remotely on the update interval.</p>
       ${
         Object.keys(defaults).length > 0
           ? `<p class="muted">Fields marked <span class="badge">inherited</span> follow the
