@@ -81,6 +81,15 @@ Current work queue, in order. Update as items land.
       delta with fleet republish, tenant duplicate, wizard defaults step,
       refreshed docs and screenshots)
 
+- [x] v0.5.0 (untagged; superseded same day): toolbar pinning in every
+      registry artifact, RMM deployment script with browser toggles,
+      CIPP wizard tie-in, wizard branding step gains primary color and
+      default logo, workers_dev/preview_urls declared explicitly.
+
+- [x] v0.5.1 release (guided rules draft editor with Easy add and the
+      effect summary, policy deployment banner, deploy-copy CI fixes,
+      monitoring guide, refreshed docs, screenshots, and wiki)
+
 Queue complete.
 
 The numbered sections below are scoped and ready to start, in priority
