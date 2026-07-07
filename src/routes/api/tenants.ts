@@ -130,7 +130,7 @@ tenantsRoutes.get("/:id", async (c) => {
   const tenant = await requireTenant(c);
   if (tenant === null) return c.json({ error: "tenant not found" }, 404);
 
-  const [guids, version, draft] = await Promise.all([
+  const [guids, version, draft, lastFetch] = await Promise.all([
     c.env.DB.prepare(
       "SELECT guid, status, label, created_at, revoked_at FROM tenant_guids " +
         "WHERE tenant_id = ? ORDER BY created_at",
@@ -147,12 +147,19 @@ tenantsRoutes.get("/:id", async (c) => {
     )
       .bind(tenant.id)
       .first(),
+    // The tenant onboarding wizard's verify step watches for this.
+    c.env.DB.prepare(
+      "SELECT MAX(last_fetch_at) AS last_fetch_at FROM fetch_metrics WHERE tenant_id = ?",
+    )
+      .bind(tenant.id)
+      .first<{ last_fetch_at: string | null }>(),
   ]);
   return c.json({
     tenant,
     guids: guids.results,
     current_version: version,
     draft,
+    last_fetch_at: lastFetch?.last_fetch_at ?? null,
   });
 });
 

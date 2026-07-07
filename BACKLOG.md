@@ -90,6 +90,13 @@ Current work queue, in order. Update as items land.
       effect summary, policy deployment banner, deploy-copy CI fixes,
       monitoring guide, refreshed docs, screenshots, and wiki)
 
+- [x] Tenant onboarding wizard: shipped in full (Onboard wizard button on
+      the tenant list, Continue onboarding on never-published tenants,
+      route with seven live-state steps ending at a per-method deployment
+      checklist with inline downloads; Intune checklist labeled untested;
+      detail response gained last_fetch_at for the verify step, with a
+      test). Entry deleted below per convention.
+
 Queue complete.
 
 The numbered sections below are scoped and ready to start, in priority
@@ -101,8 +108,7 @@ that takes the whole dashboard away; rate-limiting-as-code hardens public
 endpoints but duplicates protections Cloudflare already provides by
 default, so it goes last. Sections 4 and up were scoped later and sit in
 arrival order, not priority; 1 and 5 share a query and are best built
-together. Exception: the tenant onboarding wizard (section 8) is the
-highest-priority item in the list; take it first.
+together.
 
 ## 1. Fetch metrics sparkline on the tenant list
 
@@ -375,62 +381,7 @@ verify by syncing a real copy across a workflow-touching release.
 
 **Sizing:** two hours.
 
-## 8. Add Tenant onboarding wizard (high priority)
-
-**Goal:** the first-run setup wizard onboards the *instance*; nothing
-onboards a *tenant*. After "Create and publish" an operator faces six
-tabs and has to know the right order themselves (branding before
-artifacts, policy before artifacts, publish before deploying, which
-artifact matches their tooling). A per-tenant wizard walks the logical
-steps of adding a client end to end, closing at the deployment method
-they actually use.
-
-**Decision: same pattern as the setup wizard.** Live server state drives
-every step badge (resumable, safe with concurrent operators, no local
-state machine), steps render from the existing tab editors rather than
-duplicating them, and the wizard is a convenience layer: everything
-remains doable from the tabs directly. Entry points: the New tenant
-action offers "create and walk me through it", and a "Continue
-onboarding" link shows on tenants that have never published.
-
-**Mechanics:**
-
-- Route `#/tenants/{id}/onboard`, rendered by a `renderTenantOnboard`
-  sibling of `renderSetup`, reusing `setupStep` and the live-status
-  derivation. Step state comes from the tenant detail response (branding
-  row, policy row, draft, current_version, fetch state), which already
-  carries everything needed.
-- Steps, each embedding the matching tab editor or linking to it:
-  1. **Name and notes** (done at creation; shown for confirmation).
-  2. **Branding** (skippable; shows what inherits from tenant defaults).
-  3. **Policy essentials** (URL allowlist, CIPP tenant id when CIPP is
-     on; the rest stays on the Policy tab).
-  4. **Rules delta** (skippable; Easy add front and center).
-  5. **Publish** (gates surfaced inline).
-  6. **Deploy**: a method picker covering the known paths, one checklist
-     per method with its artifact download inline: managed storage JSON
-     (generic RMM), the RMM deployment script, .reg import, GPO script,
-     Firefox policies.json, Intune variable block, CIPP standard fields.
-     Method choice is cosmetic (shows one checklist), never stored.
-  7. **Verify**: watch for the first fetch (Last fetch plus the tenant's
-     fetch state), mirroring runbook verification guidance.
-- **Intune caveat:** no Intune tenant is available for testing, so the
-  Intune checklist ships as documentation parity with Check's own docs,
-  clearly labeled as untested guidance; the artifact itself is already
-  golden-locked. Community verification welcome; issue link in the step.
-- Runbook: the "Create the first client tenant" step and routine
-  operations point at the wizard; screenshots refreshed.
-
-**Tests:** step-state derivation from seeded tenants at each stage
-(fresh, branded, published, fetched); the deploy step renders every
-method's checklist; no server changes expected beyond possibly exposing
-fetch state on the detail response if the list-only fields are not
-enough.
-
-**Sizing:** one to one and a half days; the deploy-step checklists are
-the substance.
-
-## 9. Future candidates (unscoped)
+## 8. Future candidates (unscoped)
 
 - **Wiki regeneration automation.** CI cannot regenerate the GitNexus wiki
   (needs the local index and an LLM key); today the freshness nudge is a

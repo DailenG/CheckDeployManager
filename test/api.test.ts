@@ -98,6 +98,17 @@ describe("tenants CRUD", () => {
     const detailBody = await detail.json<any>();
     expect(detailBody.tenant.name).toBe("Harborview Physical Therapy");
     expect(detailBody.guids.length).toBe(1);
+    // The onboarding wizard's verify step reads this.
+    expect(detailBody.last_fetch_at).toBeNull();
+
+    await env.DB.prepare(
+      "INSERT INTO fetch_metrics (tenant_id, guid, day, hits, not_modified, last_fetch_at) " +
+        "VALUES (?, ?, ?, 1, 0, ?)",
+    )
+      .bind(created.id, created.guid, "2026-07-07", "2026-07-07T12:00:00.000Z")
+      .run();
+    const fetchedDetail = await (await api(`/api/tenants/${created.id}`)).json<any>();
+    expect(fetchedDetail.last_fetch_at).toBe("2026-07-07T12:00:00.000Z");
 
     const rename = await api(
       `/api/tenants/${created.id}`,

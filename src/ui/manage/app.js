@@ -200,6 +200,7 @@ function isNewerVersion(candidate, current) {
 const routes = [
   { pattern: /^#\/setup$/, render: renderSetup, nav: "setup" },
   { pattern: /^#\/tenants$/, render: renderTenantList, nav: "tenants" },
+  { pattern: /^#\/tenants\/([0-9a-f-]+)\/onboard$/, render: renderTenantOnboard, nav: "tenants" },
   { pattern: /^#\/tenants\/([0-9a-f-]+)(?:\/(\w+))?$/, render: renderTenantDetail, nav: "tenants" },
   { pattern: /^#\/events$/, render: renderEvents, nav: "events" },
   { pattern: /^#\/upstream$/, render: renderUpstream, nav: "upstream" },
@@ -271,7 +272,10 @@ async function renderTenantList() {
   view.innerHTML = `
     <div class="row spread">
       <h1>Tenants</h1>
-      <button id="new-tenant" class="primary">New tenant</button>
+      <div class="row">
+        <button id="onboard-tenant">Onboard wizard</button>
+        <button id="new-tenant" class="primary">New tenant</button>
+      </div>
     </div>
     <div class="panel">
       <table>
@@ -288,6 +292,19 @@ async function renderTenantList() {
       const created = await api("/tenants", jsonBody("POST", { name: name.trim() }));
       toast(`Tenant created with GUID ${created.guid}`);
       location.hash = `#/tenants/${created.id}`;
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
+  document.getElementById("onboard-tenant").addEventListener("click", async () => {
+    const name = prompt(
+      "Tenant name (client organization). The wizard walks branding, policy, rules, publish, and deployment:",
+    );
+    if (!name || !name.trim()) return;
+    try {
+      const created = await api("/tenants", jsonBody("POST", { name: name.trim() }));
+      toast(`Tenant created with GUID ${created.guid}`);
+      location.hash = `#/tenants/${created.id}/onboard`;
     } catch (error) {
       toast(error.message, true);
     }
@@ -324,6 +341,11 @@ async function renderTenantDetail(tenantId, tab) {
     <div class="row spread">
       <h1>${esc(tenant.name)}</h1>
       <div class="row">
+        ${
+          detail.current_version === null
+            ? `<button id="continue-onboard" class="small primary">Continue onboarding</button>`
+            : ""
+        }
         <button id="duplicate-tenant" class="small">Duplicate</button>
         <button id="rename-tenant" class="small">Rename</button>
         <button id="delete-tenant" class="small danger">Delete</button>
@@ -336,6 +358,9 @@ async function renderTenantDetail(tenantId, tab) {
 
   document.getElementById("copy-preview").addEventListener("click", () => {
     copyText(`${location.origin}/preview/${tenant.preview_token}.json`);
+  });
+  document.getElementById("continue-onboard")?.addEventListener("click", () => {
+    location.hash = `#/tenants/${tenantId}/onboard`;
   });
   document.getElementById("duplicate-tenant").addEventListener("click", async () => {
     const name = prompt(
@@ -1962,6 +1987,389 @@ async function renderSetup() {
   document.getElementById("setup-finish")?.addEventListener("click", () => {
     finishSetup("Setup complete");
   });
+}
+
+/* ---------- tenant onboarding wizard ---------- */
+
+/* Deployment methods for the wizard's deploy step. Downloads reference
+   ArtifactBundle fields; the checklist is the runbook's guidance in brief.
+   Method choice is cosmetic and never stored. */
+const ONBOARD_METHODS = [
+  {
+    key: "rmm",
+    label: "RMM deployment script",
+    downloads: [["rmm_script", "check-rmm-deploy.ps1", "text/plain"]],
+    steps: [
+      "Open the script and set the three $Include* browser toggles at the top (all on by default; the Artifacts tab has checkboxes that preset them).",
+      "Deploy to Windows endpoints as SYSTEM via your RMM. Re-running is safe; the registry writes are idempotent.",
+      "Firefox only: fill install_url inside the embedded policies.json with your XPI source per the Check docs first.",
+      "After any policy or branding change, download a fresh copy and redeploy.",
+    ],
+  },
+  {
+    key: "managed",
+    label: "Managed storage JSON (generic RMM)",
+    downloads: [["chrome_managed_storage", "check-managed-storage.json", "application/json"]],
+    steps: [
+      "Push the JSON as the 3rd-party extension policy for Chrome (benimdeioplgkhanklclahllklceahbe) and Edge (knepjpocdagponkonnbggpcnhnaikajg).",
+      "Force-install the extension separately (ExtensionSettings installation_mode force_installed), or use the RMM script method which does both.",
+      "Re-push after any policy or branding change.",
+    ],
+  },
+  {
+    key: "reg",
+    label: "Registry files (.reg import)",
+    downloads: [
+      ["reg_chrome", "check-chrome-policy.reg", "text/plain"],
+      ["reg_edge", "check-edge-policy.reg", "text/plain"],
+    ],
+    steps: [
+      "Import both files on managed Windows devices with administrator rights.",
+      "Run gpupdate /force or restart the browser to apply.",
+      "Re-import after any policy or branding change.",
+    ],
+  },
+  {
+    key: "gpo",
+    label: "GPO creation script (domain)",
+    downloads: [["gpo_script", "check-gpo-script.ps1", "text/plain"]],
+    steps: [
+      "Run on a domain-joined management host with RSAT; it creates or updates the named GPO.",
+      "Link the GPO with the New-GPLink command the script prints.",
+      "Optional: import Check's ADMX templates into the central store so the values read cleanly in the Group Policy Management Editor (link on the Artifacts tab).",
+      "Re-run the script after any policy or branding change.",
+    ],
+  },
+  {
+    key: "firefox",
+    label: "Firefox policies.json",
+    downloads: [["firefox_policies_full", "policies.json", "application/json"]],
+    steps: [
+      "Fill install_url with your XPI source per the Check docs (blank by default).",
+      "Place the file in the Firefox distribution directory on managed devices.",
+      "Restart Firefox; policies load at startup.",
+    ],
+  },
+  {
+    key: "intune",
+    label: "Intune (Check setup script)",
+    untested: true,
+    downloads: [["intune_variables", "check-intune-variables.ps1", "text/plain"]],
+    steps: [
+      "Paste the variable block into Check's Setup-Windows-Chrome-and-Edge.ps1 workflow per the Check deployment docs.",
+      "Package per those docs and assign to a pilot ring first.",
+      "Confirm the detection script passes, then widen assignment.",
+    ],
+  },
+  {
+    key: "cipp",
+    label: "CIPP deployment standard",
+    downloads: [],
+    steps: [
+      "Open this tenant's Artifacts tab and copy the CIPP standard field values table.",
+      "Enter the values in CIPP's Check deployment standard for the matching CIPP tenant; CIPP fills the tenant id per tenant.",
+      "Re-run or re-sync the standard after any policy or branding change.",
+    ],
+  },
+];
+
+async function renderTenantOnboard(tenantId) {
+  const detail = await api(`/tenants/${tenantId}`);
+  const tenant = detail.tenant;
+  const instanceSettings = (await api("/instance/settings")).settings;
+  const brandingData = await api(`/tenants/${tenantId}/branding`);
+  const policyData = await api(`/tenants/${tenantId}/policy`);
+  const published = detail.current_version !== null;
+
+  // Artifacts render fresh only once publishable state exists.
+  let artifacts = null;
+  let artifactsError = "";
+  if (published) {
+    try {
+      artifacts = (await api(`/tenants/${tenantId}/artifacts`)).artifacts;
+    } catch (error) {
+      artifactsError = error.message;
+    }
+  }
+
+  const b = brandingData.branding;
+  const bDefaults = brandingData.defaults || {};
+  const brandingOwn = [
+    "company_name",
+    "product_name",
+    "support_email",
+    "support_url",
+    "privacy_policy_url",
+    "about_url",
+  ].some((key) => (b[key] || "") !== "") || b.logo_r2_key !== null;
+  const brandingRows = [
+    ["Company name", "company_name"],
+    ["Product name", "product_name"],
+    ["Support email", "support_email"],
+    ["Support URL", "support_url"],
+  ]
+    .map(([label, key]) => {
+      const own = b[key] || "";
+      const effective = own || bDefaults[key] || "";
+      const source = own ? "" : effective ? ' <span class="badge">inherited</span>' : "";
+      return `<dt>${esc(label)}</dt><dd>${esc(effective || "(unset)")}${source}</dd>`;
+    })
+    .join("");
+
+  const pol = policyData.settings;
+  const polDefaults = policyData.defaults || {};
+  const cippConfigured =
+    (typeof pol.cippServerUrl === "string" && pol.cippServerUrl !== "") ||
+    (instanceSettings.default_cipp_server_url || "") !== "";
+  const cippOn =
+    cippConfigured &&
+    (pol.enableCippReporting ?? polDefaults.enableCippReporting ?? false) === true;
+  const cippTenantId = typeof pol.cippTenantId === "string" ? pol.cippTenantId : "";
+  const ownAllowlist = Array.isArray(pol.urlAllowlist) ? pol.urlAllowlist : null;
+  const defaultAllowlist = Array.isArray(polDefaults.urlAllowlist)
+    ? polDefaults.urlAllowlist
+    : [];
+  const allowlistShown = ownAllowlist ?? defaultAllowlist;
+  const policyDone = !(cippOn && cippTenantId === "");
+
+  const savedDelta = detail.draft ? parseDeltaText(detail.draft.draft_json) : null;
+  const deltaKeyCount = savedDelta === null ? 0 : Object.keys(savedDelta).length;
+
+  const fetched = detail.last_fetch_at !== null;
+
+  const step1 = setupStep(
+    1,
+    "Tenant created",
+    "done",
+    `<p><strong>${esc(tenant.name)}</strong>, created ${esc(fmtTime(tenant.created_at))},
+      with its config GUID and preview token minted. Rename, duplicate, and
+      delete live on the <a href="#/tenants/${esc(tenantId)}">tenant page</a>.</p>`,
+  );
+
+  const step2 = setupStep(
+    2,
+    "Branding (optional)",
+    brandingOwn ? "done" : "todo",
+    `<p>What the extension shows this client's users. Blank fields inherit
+      the instance defaults, so skip freely if the defaults fit.</p>
+      <dl class="kv">${brandingRows}</dl>
+      <p><a href="#/tenants/${esc(tenantId)}/branding">Open the Branding tab</a>
+      to set client-specific values or upload a logo${
+        brandingData.default_logo ? " (the instance default logo serves until then)" : ""
+      }.</p>`,
+  );
+
+  const step3 = setupStep(
+    3,
+    "Policy essentials",
+    policyDone ? "done" : "todo",
+    `<p>The two settings that most often differ per client; everything else
+      lives on the <a href="#/tenants/${esc(tenantId)}/policy">Policy tab</a>.</p>
+      <label class="field"><span>URL allowlist (one pattern per line${
+        ownAllowlist === null && defaultAllowlist.length > 0 ? "; currently inherited" : ""
+      })</span>
+        <textarea id="ob-allowlist" class="lines" spellcheck="false">${esc(allowlistShown.join("\n"))}</textarea></label>
+      ${
+        cippOn
+          ? `<label class="field"><span>CIPP tenant id / domain (required for direct
+              deployments; the CIPP standard fills it per tenant)</span>
+              <input type="text" id="ob-cipp-tenant" value="${esc(cippTenantId)}"></label>`
+          : ""
+      }
+      <button id="ob-save-policy" class="primary">Save policy essentials</button>`,
+  );
+
+  const step4 = setupStep(
+    4,
+    "Rules delta (optional)",
+    deltaKeyCount > 0 ? "done" : "todo",
+    `<p>Client-specific rule adjustments layered onto the upstream rules.
+      Most tenants need at most an exclusion for their own domains; skip
+      freely.</p>
+      <div class="easy-add">
+        <strong>Easy add</strong>
+        <span class="muted">builds the pattern regex from a plain domain</span>
+        <div class="row" style="align-items:center;flex-wrap:wrap;margin-top:8px">
+          <input type="text" id="ob-domain" placeholder="clientdomain.com or a full URL" style="flex:1;min-width:220px">
+          <label class="check"><input type="checkbox" id="ob-subs" checked> include subdomains</label>
+          <select id="ob-target">
+            <option value="add_exclusion_domain_patterns">as exclusion pattern</option>
+            <option value="add_trusted_login_patterns">as trusted login pattern</option>
+          </select>
+          <button id="ob-add" class="primary small">Add and save</button>
+        </div>
+      </div>
+      <p class="muted">${
+        deltaKeyCount > 0
+          ? `Saved draft has ${esc(deltaKeyCount)} delta key${deltaKeyCount === 1 ? "" : "s"}.`
+          : "No delta saved yet."
+      } The full editor (suppressions, indicators, raw JSON) is the
+      <a href="#/tenants/${esc(tenantId)}/rules">Rules draft tab</a>.</p>`,
+  );
+
+  const step5 = setupStep(
+    5,
+    "Publish",
+    published ? "done" : "todo",
+    published
+      ? `<p>Version <strong>v${esc(detail.current_version.version_number)}</strong> is live
+          at this tenant's config URL. Later changes republish from the
+          <a href="#/tenants/${esc(tenantId)}/rules">Rules draft tab</a>.</p>`
+      : `<p>Merges the upstream rules with the baseline and this tenant's
+          delta, then serves the result at the tenant's config URL. Nothing
+          deploys to browsers yet; that is the next step.</p>
+          <button id="ob-publish" class="primary">Publish</button>
+          <div id="findings"></div>`,
+  );
+
+  let deployBody;
+  if (!published) {
+    deployBody = "";
+  } else if (artifacts === null) {
+    deployBody = `<p class="badge warn">cannot generate artifacts</p>
+      <p class="muted">${esc(artifactsError)}</p>`;
+  } else {
+    const options = ONBOARD_METHODS.map(
+      (method) =>
+        `<option value="${esc(method.key)}">${esc(method.label)}${method.untested ? " (untested)" : ""}</option>`,
+    ).join("");
+    deployBody = `<p>Pick the deployment tooling you use for this client; the
+        choice only filters the checklist. Every artifact stays on the
+        <a href="#/tenants/${esc(tenantId)}/artifacts">Artifacts tab</a>.</p>
+      <label class="field"><span>Deployment method</span>
+        <select id="ob-method">${options}</select></label>
+      <div id="ob-method-body"></div>`;
+  }
+  const step6 = setupStep(
+    6,
+    "Deploy to browsers",
+    published ? "todo" : "locked",
+    deployBody,
+  );
+
+  const step7 = setupStep(
+    7,
+    "Verify",
+    fetched ? "done" : published ? "todo" : "locked",
+    fetched
+      ? `<p>A browser fetched this tenant's rules ${esc(ago(detail.last_fetch_at))}.
+          Onboarding is complete; day-to-day health lives on the
+          <a href="#/tenants">tenant list</a> (Last fetch column) and in the
+          monitoring guide.</p>`
+      : `<p>Point a test browser with the Check extension at the config URL
+          (or deploy to a pilot device) and wait for its first fetch; fetches
+          land within the update interval, immediately on a fresh install.</p>
+          <p>Last fetch: <strong>${esc(ago(detail.last_fetch_at))}</strong>
+          <button id="ob-refresh" class="small">Check again</button></p>`,
+  );
+
+  view.innerHTML = `
+    <div class="row spread">
+      <h1>Onboarding: ${esc(tenant.name)}</h1>
+      <a class="badge" href="#/tenants/${esc(tenantId)}">exit to tenant page</a>
+    </div>
+    <p class="muted">Statuses derive from live server state, so this wizard is
+      resumable; leave and come back any time. Steps 2 through 4 are optional.</p>
+    ${step1}${step2}${step3}${step4}${step5}${step6}${step7}`;
+
+  document.getElementById("ob-save-policy")?.addEventListener("click", async () => {
+    const lines = document
+      .getElementById("ob-allowlist")
+      .value.split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const settings = { ...pol };
+    if (JSON.stringify(lines) === JSON.stringify(defaultAllowlist)) {
+      delete settings.urlAllowlist;
+    } else {
+      settings.urlAllowlist = lines;
+    }
+    const cippField = document.getElementById("ob-cipp-tenant");
+    if (cippField) {
+      const value = cippField.value.trim();
+      if (value === "") delete settings.cippTenantId;
+      else settings.cippTenantId = value;
+    }
+    try {
+      await api(`/tenants/${tenantId}/policy`, jsonBody("PUT", { settings }));
+      toast("Policy essentials saved");
+      route();
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
+
+  document.getElementById("ob-add")?.addEventListener("click", async () => {
+    const pattern = domainToPattern(
+      document.getElementById("ob-domain").value,
+      document.getElementById("ob-subs").checked,
+    );
+    if (pattern === null) {
+      toast("Enter a domain like clientdomain.com (or paste a URL)", true);
+      return;
+    }
+    const key = document.getElementById("ob-target").value;
+    const delta = savedDelta === null ? {} : { ...savedDelta };
+    const list = Array.isArray(delta[key]) ? [...delta[key]] : [];
+    if (list.includes(pattern)) {
+      toast("That pattern is already in the draft", true);
+      return;
+    }
+    list.push(pattern);
+    delta[key] = list;
+    try {
+      const result = await api(`/tenants/${tenantId}/rules`, jsonBody("PUT", { delta }));
+      toast(result.valid ? `Added ${pattern}` : "Saved with findings; see the Rules tab", !result.valid);
+      route();
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
+
+  document.getElementById("ob-publish")?.addEventListener("click", async () => {
+    try {
+      const result = await api(`/tenants/${tenantId}/publish`, { method: "POST" });
+      toast(`Published version ${result.versionNumber}`);
+      route();
+    } catch (error) {
+      renderFindings(view, (error.body && error.body.errors) || [error.message]);
+      toast("Publish blocked by validation gates", true);
+    }
+  });
+
+  document.getElementById("ob-refresh")?.addEventListener("click", () => route());
+
+  const methodSelect = document.getElementById("ob-method");
+  if (methodSelect && artifacts !== null) {
+    const renderMethod = () => {
+      const method = ONBOARD_METHODS.find((entry) => entry.key === methodSelect.value);
+      const downloads = method.downloads
+        .map(([field, filename, mime]) => {
+          const content =
+            typeof artifacts[field] === "string"
+              ? artifacts[field]
+              : JSON.stringify(artifacts[field], null, 2);
+          const storeKey = `ob-${method.key}-${field}`;
+          artifactStore.set(storeKey, content);
+          return `<button class="small" data-download-key="${esc(storeKey)}"
+            data-filename="${esc(filename)}" data-mime="${esc(mime)}">Download ${esc(filename)}</button>`;
+        })
+        .join(" ");
+      document.getElementById("ob-method-body").innerHTML = `
+        ${
+          method.untested
+            ? `<p><span class="badge warn">untested</span> This checklist mirrors
+                Check's own deployment docs but has not been verified by this
+                project (no Intune tenant available). Reports welcome on the
+                issue tracker.</p>`
+            : ""
+        }
+        <ol>${method.steps.map((step) => `<li>${esc(step)}</li>`).join("")}</ol>
+        ${downloads ? `<div class="row">${downloads}</div>` : ""}`;
+    };
+    methodSelect.addEventListener("change", renderMethod);
+    renderMethod();
+  }
 }
 
 /* ---------- audit log ---------- */

@@ -117,7 +117,9 @@ reference for what the wizard automates.
 3. Go to **Upstream** and click **Sync now**. Confirm the snapshot validates and shows as active.
 4. Create **tenant zero** for your own organization, publish, and point a test browser at its Config URL (enroll yourself the same way clients are enrolled).
 5. Optional but recommended for fleets: fill in **Tenant defaults** on the Settings page (your standard support info, product name, logo, and policy values) so every tenant starts correct without per-tenant copy-paste. See "Tenant defaults" under routine operations.
-6. Create the first client tenant: branding (logo up to 512 KB, png/jpg/svg, 48x48 recommended), policy settings, publish, then copy artifacts from the Artifacts tab into your deployment tooling. For RMM platforms, the ready-made deployment script (browser checkboxes preset its toggles) force-installs the extension, pins it to the toolbar, and applies the full policy; the reg files, GPO script, and Firefox policies.json carry the same pinning.
+6. Create the first client tenant: the **Onboard wizard** button on the tenant list walks every step (branding, policy essentials, rules delta, publish, a per-method deployment checklist, and first-fetch verification) with statuses derived from live state, so it is resumable; tenants that never published show a **Continue onboarding** button. Or do the same by hand: branding (logo up to 512 KB, png/jpg/svg, 48x48 recommended), policy settings, publish, then copy artifacts from the Artifacts tab into your deployment tooling. For RMM platforms, the ready-made deployment script (browser checkboxes preset its toggles) force-installs the extension, pins it to the toolbar, and applies the full policy; the reg files, GPO script, and Firefox policies.json carry the same pinning.
+
+![Tenant onboarding wizard: seven steps ending at a deployment checklist](screenshots/tenant-onboard.png)
 
 ## 3. Routine operations
 
