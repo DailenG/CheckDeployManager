@@ -97,6 +97,8 @@ Current work queue, in order. Update as items land.
       detail response gained last_fetch_at for the verify step, with a
       test). Entry deleted below per convention.
 
+- [x] v0.6.0 release (tenant onboarding wizard, refreshed docs and wiki)
+
 Queue complete.
 
 The numbered sections below are scoped and ready to start, in priority

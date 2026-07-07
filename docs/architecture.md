@@ -282,7 +282,7 @@ Static dashboard at `/manage` (dark mode default). JSON API under `/api`:
 | Route | Methods | Purpose |
 |---|---|---|
 | `/api/tenants` | GET, POST | List / create tenant (create also mints GUID, preview token, default settings) |
-| `/api/tenants/{id}` | GET, PATCH, DELETE | Tenant detail / rename / decommission (delete requires zero active GUIDs) |
+| `/api/tenants/{id}` | GET, PATCH, DELETE | Tenant detail incl. last fetch (feeds the onboarding wizard's verify step) / rename / decommission (delete requires zero active GUIDs) |
 | `/api/tenants/{id}/rules` | GET, PUT | Read / save draft delta (PUT runs gates in dry-run and returns findings) |
 | `/api/tenants/{id}/publish` | POST | Gate, merge, write R2 version, move pointer, audit |
 | `/api/tenants/{id}/rollback/{versionId}` | POST | Point tenant at a prior immutable version, audit |
