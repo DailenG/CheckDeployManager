@@ -292,6 +292,18 @@ Notes for either path:
   tests pin their own Access values, the hygiene UUID check exempts
   `wrangler.jsonc` (your provisioned database id lives there), and CodeQL
   skips itself on private repos, which lack code scanning entitlements.
+- When a release changes files under `.github/workflows/`, the one-click
+  sync fails with `refusing to allow a GitHub App to create or update
+  workflow ... without workflows permission`: the Actions token can never
+  push workflow files. Update across that release with the manual path
+  above (your own push carries the scope); later releases sync one-click
+  again.
+- Turn off **Dependabot version updates** on your copy (repo Settings >
+  Advanced Security > Dependabot). The shipped `dependabot.yml` serves the
+  upstream repo; on a copy it opens dependency pull requests that diverge
+  your `package-lock.json` from upstream and manufacture sync conflicts.
+  Dependency updates reach your copy through upstream syncs; Dependabot
+  security alerts can stay on.
 
 ### Upstream sync
 
