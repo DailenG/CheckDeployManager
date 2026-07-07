@@ -16,6 +16,7 @@ import cippFieldsGolden from "./golden/cipp-fields.json";
 import chromeRegGolden from "./golden/chrome.reg?raw";
 import edgeRegGolden from "./golden/edge.reg?raw";
 import gpoScriptGolden from "./golden/gpo-script.ps1?raw";
+import rmmScriptGolden from "./golden/rmm-script.ps1?raw";
 import intuneGolden from "./golden/intune-variables.ps1?raw";
 
 const bundle = buildArtifactBundle(HARBORVIEW_ARTIFACT_INPUT);
@@ -84,6 +85,51 @@ describe("artifact golden files (Harborview sample)", () => {
 
   it("renders the CIPP field table", () => {
     expect(bundle.cipp_fields).toEqual(cippFieldsGolden);
+  });
+
+  it("pins the extension to the toolbar in every registry artifact", () => {
+    // Chrome and Edge spell the same intent differently; Firefox pins via
+    // default_area in the full policies.json.
+    expect(bundle.reg_chrome).toContain('"toolbar_pin"="force_pinned"');
+    expect(bundle.reg_edge).toContain('"toolbar_state"="force_shown"');
+    expect(bundle.reg_chrome).not.toContain("toolbar_state");
+    expect(bundle.reg_edge).not.toContain("toolbar_pin");
+    expect(bundle.gpo_script).toContain("'toolbar_pin'");
+    expect(bundle.gpo_script).toContain("'toolbar_state'");
+    const firefoxSettings = (
+      (bundle.firefox_policies_full as { policies: Record<string, unknown> })
+        .policies.ExtensionSettings as Record<string, Record<string, unknown>>
+    )["check@cyberdrain.com"];
+    expect(firefoxSettings.default_area).toBe("navbar");
+  });
+
+  it("renders the RMM deployment script in sync with the reg files", () => {
+    expect(normalizeNewlines(bundle.rmm_script)).toBe(
+      normalizeNewlines(rmmScriptGolden),
+    );
+    // The three browser toggles the dashboard checkboxes rewrite.
+    expect(bundle.rmm_script).toContain("$IncludeChrome = $true");
+    expect(bundle.rmm_script).toContain("$IncludeEdge = $true");
+    expect(bundle.rmm_script).toContain("$IncludeFirefox = $true");
+    // Registry writes derive from the same table as the reg files.
+    expect(bundle.rmm_script).toContain(
+      "HKLM:\\SOFTWARE\\Policies\\Google\\Chrome\\ExtensionSettings",
+    );
+    expect(bundle.rmm_script).toContain(
+      "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge\\ExtensionSettings",
+    );
+    expect(bundle.rmm_script).toContain("'toolbar_pin'");
+    expect(bundle.rmm_script).toContain("'toolbar_state'");
+    expect(bundle.rmm_script).toContain("customRulesUrl");
+    // The Firefox block embeds the same policies.json the full artifact ships.
+    expect(bundle.rmm_script).toContain('"default_area": "navbar"');
+    expect(bundle.rmm_script).toContain("policies.json");
+    // Rule 4: generated PowerShell never sequences with && or ||.
+    expect(bundle.rmm_script).not.toMatch(/&&|\|\|/);
+    // 7-bit ASCII only.
+    expect([...bundle.rmm_script].every((ch) => ch.charCodeAt(0) <= 126)).toBe(
+      true,
+    );
   });
 });
 

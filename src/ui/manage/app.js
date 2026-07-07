@@ -799,6 +799,23 @@ async function renderArtifactsTab(container, tenantId) {
         <a href="https://github.com/CyberDrain/Check/blob/v1.1.0/enterprise/admx/Check-Extension.admx" target="_blank" rel="noreferrer">Check-Extension.admx</a> &middot;
         <a href="https://github.com/CyberDrain/Check/blob/v1.1.0/enterprise/admx/en-US/Check-Extension.adml" target="_blank" rel="noreferrer">Check-Extension.adml</a> &middot;
         <a href="https://docs.check.tech/deployment/chrome-edge-deployment-instructions/windows/domain-deployment" target="_blank" rel="noreferrer">Domain deployment docs</a></p>
+      <h2>RMM deployment script</h2>
+      <p class="muted">Ready-made PowerShell for RMM deployment on Windows endpoints
+        (run as SYSTEM): force-installs the extension, pins it to the toolbar, and
+        writes this tenant's full policy and branding for the selected browsers.
+        The checkboxes preset the toggle variables at the top of the script, so
+        the choice stays editable after download. Firefox needs install_url
+        filled in per the Check docs before its block is useful.</p>
+      <div class="row" style="margin-bottom:6px">
+        <label class="check"><input type="checkbox" id="rmm-chrome" checked> Chrome</label>
+        <label class="check"><input type="checkbox" id="rmm-edge" checked> Edge</label>
+        <label class="check"><input type="checkbox" id="rmm-firefox" checked> Firefox</label>
+      </div>
+      <div class="row" style="margin-bottom:6px">
+        <button class="small" data-copy-key="rmm">Copy</button>
+        <button class="small" data-download-key="rmm" data-filename="check-rmm-deploy.ps1" data-mime="text/plain">Download</button>
+      </div>
+      <pre class="code" id="rmm-pre">${esc(artifacts.rmm_script)}</pre>
       ${artifactSection(
         "intune",
         "Intune variable block (Check Setup script)",
@@ -811,6 +828,31 @@ async function renderArtifactsTab(container, tenantId) {
       <p class="muted">Enter these values in CIPP's Check deployment standard for this tenant.</p>
       <table><thead><tr><th>CIPP standard field</th><th>Value</th></tr></thead><tbody>${cippTable}</tbody></table>
     </div>`;
+
+  // The RMM script ships three $Include* toggles defaulted to $true; the
+  // checkboxes rewrite those lines in the stored copy so Copy and Download
+  // carry the selection while the script text stays operator-editable.
+  const rmmToggles = [
+    ["rmm-chrome", "$IncludeChrome"],
+    ["rmm-edge", "$IncludeEdge"],
+    ["rmm-firefox", "$IncludeFirefox"],
+  ];
+  const updateRmmScript = () => {
+    let script = artifacts.rmm_script;
+    for (const [id, variable] of rmmToggles) {
+      const checked = container.querySelector(`#${id}`).checked;
+      script = script.replace(
+        `${variable} = $true`,
+        `${variable} = ${checked ? "$true" : "$false"}`,
+      );
+    }
+    artifactStore.set("rmm", script);
+    container.querySelector("#rmm-pre").textContent = script;
+  };
+  for (const [id] of rmmToggles) {
+    container.querySelector(`#${id}`).addEventListener("change", updateRmmScript);
+  }
+  updateRmmScript();
 }
 
 async function renderGuidsTab(container, tenantId) {
@@ -1388,7 +1430,8 @@ async function renderSetup() {
        <input type="text" id="setup-base-url" value="${esc(settings.public_base_url || location.origin)}"></label>
      <label class="field"><span>Version suffix label</span>
        <input type="text" id="setup-suffix" value="${esc(settings.version_suffix_label ?? "")}"></label>
-     <label class="field"><span>Default CIPP server URL (optional; blank disables CIPP)</span>
+     <label class="field"><span>Default CIPP server URL (optional; entering one also
+       turns on the fleet-wide CIPP reporting default, editable under Settings)</span>
        <input type="text" id="setup-cipp" value="${esc(settings.default_cipp_server_url ?? "")}"></label>
      <button id="setup-save" class="primary">Save settings</button>`,
   );
@@ -1480,8 +1523,8 @@ async function renderSetup() {
     tenantDone ? "todo" : "locked",
     `<p>Grab deployment files from the tenant's
        <a href="${esc(artifactsLink)}">Artifacts tab</a>: managed storage
-       JSON, reg files for GPO, Firefox policies, Intune variables, and CIPP
-       fields.</p>
+       JSON, reg files for GPO, an RMM deployment script, Firefox policies,
+       Intune variables, and CIPP fields.</p>
      <p>To verify end to end, point a test browser with the extension at the
        Config URL and watch the Last fetch column on the tenant list.</p>
      <button id="setup-finish" class="primary">Finish setup</button>`,
@@ -1505,16 +1548,24 @@ async function renderSetup() {
   if (save) {
     save.addEventListener("click", async () => {
       try {
-        await api(
-          "/instance/settings",
-          jsonBody("PUT", {
-            settings: {
-              public_base_url: document.getElementById("setup-base-url").value.trim(),
-              version_suffix_label: document.getElementById("setup-suffix").value.trim(),
-              default_cipp_server_url: document.getElementById("setup-cipp").value.trim(),
-            },
-          }),
-        );
+        const cippUrl = document.getElementById("setup-cipp").value.trim();
+        const updates = {
+          public_base_url: document.getElementById("setup-base-url").value.trim(),
+          version_suffix_label: document.getElementById("setup-suffix").value.trim(),
+          default_cipp_server_url: cippUrl,
+        };
+        // The CIPP URL only reaches artifacts once CIPP reporting is on, and
+        // reporting defaults to off, so entering a URL here also sets the
+        // fleet-wide reporting default. An operator who already decided it
+        // either way keeps their choice.
+        if (cippUrl !== "") {
+          const merged = parseDefaultsSetting(settings.tenant_defaults || "");
+          if (merged.policy.enableCippReporting === undefined) {
+            merged.policy.enableCippReporting = true;
+            updates.tenant_defaults = JSON.stringify(merged);
+          }
+        }
+        await api("/instance/settings", jsonBody("PUT", { settings: updates }));
         toast("Settings saved");
         route();
       } catch (error) {

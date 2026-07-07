@@ -419,7 +419,7 @@ The generator emits both the fragment above and a merged full `policies.json` (w
 
 ### 5.3 GPO / registry artifact (.reg download plus value table)
 
-Registry layout verified against Check's own deploy script: managed storage under `...\3rdparty\extensions\<id>\policy`, force-install under `...\ExtensionSettings\<id>`, booleans as DWORD 0/1, `urlAllowlist` as a subkey with numbered string values, `genericWebhook`/`domainSquatting`/`customBranding` as subkeys. Chrome shown; the Edge output is identical under `HKLM\SOFTWARE\Policies\Microsoft\Edge` with the Edge extension id.
+Registry layout verified against Check's own deploy script: managed storage under `...\3rdparty\extensions\<id>\policy`, force-install and toolbar pinning under `...\ExtensionSettings\<id>`, booleans as DWORD 0/1, `urlAllowlist` as a subkey with numbered string values, `genericWebhook`/`domainSquatting`/`customBranding` as subkeys. Chrome shown; the Edge output is identical under `HKLM\SOFTWARE\Policies\Microsoft\Edge` with the Edge extension id, except that Edge spells the pin as `"toolbar_state"="force_shown"` (Chrome uses `toolbar_pin`; Firefox pins via `default_area: navbar` in policies.json). Pinning is deliberate: a managed security extension users cannot see is one they cannot act on.
 
 ```reg
 Windows Registry Editor Version 5.00
@@ -427,6 +427,7 @@ Windows Registry Editor Version 5.00
 [HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\ExtensionSettings\benimdeioplgkhanklclahllklceahbe]
 "installation_mode"="force_installed"
 "update_url"="https://clients2.google.com/service/update2/crx"
+"toolbar_pin"="force_pinned"
 
 [HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy]
 "customRulesUrl"="https://check.example.com/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json"
@@ -472,6 +473,8 @@ Windows Registry Editor Version 5.00
 For admins using the Check ADMX (Deploy-ADMX.ps1 workflow), the dashboard also renders the same values as a field-by-field table matching the template UI under `Computer Configuration > Policies > Administrative Templates > CyberDrain > Check`.
 
 The Artifacts tab also renders a ready-to-run **GPO creation script** (`check-gpo-script.ps1`): a `New-GPO` / `Set-GPRegistryValue` PowerShell script that writes every value above for both browsers into a named GPO, printing the `New-GPLink` command as guidance rather than linking an OU itself. Both the `.reg` files and the script derive from one shared registry-writes table in the generator, so they cannot drift; golden tests lock both. The script links to Check's upstream ADMX/ADML at a pinned release tag rather than vendoring them: the templates are AGPL-3.0 and this repository is MIT, so they are referenced, never copied. The templates stay optional for enforcement (values are written directly) and exist to make the GPO readable in the Group Policy Management Editor.
+
+A third consumer of the same registry-writes table is the **RMM deployment script** (`check-rmm-deploy.ps1`): a standalone PowerShell script for RMM platforms that runs as SYSTEM on each endpoint, writing the Chrome and Edge policy values directly to HKLM and dropping the full Firefox `distribution\policies.json` (backing up any existing one). Three `$IncludeChrome` / `$IncludeEdge` / `$IncludeFirefox` toggle variables head the script; checkboxes on the Artifacts tab preset them before download, and they remain plain editable variables afterward. The Firefox block ships the same policies.json as the dedicated artifact, `install_url` blank until the deployer supplies an XPI source.
 
 ### 5.4 Intune artifact (Check Setup script variable block)
 

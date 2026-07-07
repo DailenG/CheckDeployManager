@@ -199,7 +199,46 @@ as acceptance.
 **Sizing:** half a day, mostly verification against current Cloudflare
 schemas.
 
-## 4. Future candidates (unscoped)
+## 4. Color swatch on the Primary color fields
+
+**Goal:** the Primary color inputs (tenant Branding tab, Tenant defaults
+panel, wizard branding step) are plain text fields, so a typo like
+`#F7700` or `1B6FA8` only shows up after deployment when the extension
+renders the wrong brand color. A live swatch inside the field makes the
+value verifiable at a glance, and clicking it should open a color picker.
+
+**Decision: progressive enhancement around the existing text inputs.** The
+text field stays the source of truth (operators paste brand hex codes);
+the swatch and picker are conveniences layered on top, so nothing changes
+for keyboard-only or paste workflows.
+
+**Mechanics:**
+
+- A `colorField(id, label, value, inherited)` helper in `app.js` wrapping
+  the current text input in a `position: relative` container with a small
+  swatch square (about 16x16, `border-radius: 3px`) absolutely positioned
+  inside the field's right edge.
+- The swatch background tracks the input on every `input` event; an
+  invalid or empty value renders a neutral checkerboard/empty style rather
+  than silently showing the last good color. Validity check: assign to a
+  detached `option.style.color` and see if it sticks (covers hex, rgb(),
+  and named colors without a regex).
+- Clicking the swatch opens the native picker: a visually hidden
+  `<input type="color">` overlaying the swatch, kept in sync both ways.
+  Native pickers only speak `#rrggbb`, so seed it from the parsed value
+  when valid and write `#rrggbb` back into the text field on change.
+  `input[type="color"]` base styling already exists in `styles.css`.
+- Apply to all three Primary color fields: `#b-color` (Branding tab, keep
+  the inherited-placeholder behavior), `td-b-primary_color` (Settings
+  defaults panel), and `setup-td-color` (wizard branding step).
+
+**Tests:** none in CI (pure client-side rendering; the dashboard UI has no
+test harness). Manual pass across the three fields, including an inherited
+blank value on the Branding tab.
+
+**Sizing:** two to three hours.
+
+## 5. Future candidates (unscoped)
 
 - **Wiki regeneration automation.** CI cannot regenerate the GitNexus wiki
   (needs the local index and an LLM key); today the freshness nudge is a

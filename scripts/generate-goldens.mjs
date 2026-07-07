@@ -37,5 +37,6 @@ writeGolden(
 writeGolden("chrome.reg", bundle.reg_chrome);
 writeGolden("edge.reg", bundle.reg_edge);
 writeGolden("gpo-script.ps1", bundle.gpo_script);
+writeGolden("rmm-script.ps1", bundle.rmm_script);
 writeGolden("intune-variables.ps1", bundle.intune_variables);
 writeGolden("cipp-fields.json", JSON.stringify(bundle.cipp_fields, null, 2) + "\n");

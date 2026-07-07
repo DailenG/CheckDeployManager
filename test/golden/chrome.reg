@@ -3,6 +3,7 @@ Windows Registry Editor Version 5.00
 [HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\ExtensionSettings\benimdeioplgkhanklclahllklceahbe]
 "installation_mode"="force_installed"
 "update_url"="https://clients2.google.com/service/update2/crx"
+"toolbar_pin"="force_pinned"
 
 [HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy]
 "customRulesUrl"="https://check.example.com/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json"
