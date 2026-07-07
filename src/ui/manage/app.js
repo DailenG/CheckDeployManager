@@ -486,17 +486,21 @@ async function renderRulesTab(container, tenantId, detail) {
         indicators, raw overrides deep-merge last. The instance baseline
         delta (Settings page) applies beneath all of it.</p>
       <div id="guided" ${mode === "raw" ? "hidden" : ""}>
-        ${guidedFields}
-        <div class="row" style="align-items:center;flex-wrap:wrap">
-          <span class="muted">Easy add: build the regex from a domain</span>
-          <input type="text" id="pb-domain" placeholder="training.knowbe4.com or a full URL" style="flex:1;min-width:220px">
-          <label class="check"><input type="checkbox" id="pb-subs" checked> include subdomains</label>
-          <select id="pb-target">
-            <option value="add_exclusion_domain_patterns">as exclusion pattern</option>
-            <option value="add_trusted_login_patterns">as trusted login pattern</option>
-          </select>
-          <button id="pb-add" class="small">Add</button>
+        <div class="easy-add">
+          <strong>Easy add</strong>
+          <span class="muted">builds the pattern regex from a plain domain,
+            no regex knowledge needed</span>
+          <div class="row" style="align-items:center;flex-wrap:wrap;margin-top:8px">
+            <input type="text" id="pb-domain" placeholder="training.knowbe4.com or a full URL" style="flex:1;min-width:220px">
+            <label class="check"><input type="checkbox" id="pb-subs" checked> include subdomains</label>
+            <select id="pb-target">
+              <option value="add_exclusion_domain_patterns">as exclusion pattern</option>
+              <option value="add_trusted_login_patterns">as trusted login pattern</option>
+            </select>
+            <button id="pb-add" class="primary small">Add</button>
+          </div>
         </div>
+        ${guidedFields}
         <details id="advanced-block" ${hasAdvanced ? "open" : ""}>
           <summary>Advanced: added indicators and raw overrides (JSON:
             <span class="mono">add_phishing_indicators, raw_overrides</span>)</summary>

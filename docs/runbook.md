@@ -126,7 +126,10 @@ reference for what the wizard automates.
 1. Tenant > Rules draft: the guided editor covers the common keys as
    one-entry-per-line fields (exclusion patterns, trusted login patterns,
    suppressed indicator ids); added indicators and raw overrides live under
-   **Advanced** as JSON. **Edit raw JSON** toggles the whole delta as one
+   **Advanced** as JSON. The **Easy add** row builds the anchored regex
+   from a plain domain or pasted URL (subdomain coverage optional) so
+   hand-writing patterns is never required for the common case.
+   **Edit raw JSON** toggles the whole delta as one
    document (keys: `add_exclusion_domain_patterns`,
    `add_trusted_login_patterns`, `add_phishing_indicators`,
    `suppress_indicator_ids`, `raw_overrides`); both views edit the same

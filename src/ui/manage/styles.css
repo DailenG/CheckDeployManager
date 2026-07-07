@@ -146,6 +146,17 @@ input[type="color"], textarea, select {
 }
 textarea { font-family: var(--mono); font-size: 13px; min-height: 140px; }
 textarea.lines { min-height: 72px; }
+
+/* The rules-draft pattern builder: framed in the accent color so the
+   no-regex-needed path is the first thing the page offers. */
+.easy-add {
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  background: var(--panel-2);
+}
+.easy-add select { width: auto; }
 textarea.tall { min-height: 260px; }
 
 label.field { display: block; margin-bottom: 12px; }

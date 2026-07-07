@@ -1,5 +1,5 @@
 <!-- GENERATED FILE, do not edit by hand.
-     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit c6c9201.
+     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit b99d78c.
      Regenerate: node .gitnexus/run.cjs wiki, then: npm run docs:wiki -->
 
 # Application Runtime
