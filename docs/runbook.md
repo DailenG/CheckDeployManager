@@ -217,24 +217,30 @@ for this).
 
 How you update depends on how you deployed:
 
-- **Deploy button, one click (recommended).** Your copy of the repo ships
-  with a **Sync upstream** workflow. In your copy on GitHub: Actions >
-  Sync upstream > Run workflow. A clean merge is pushed immediately and
-  Workers Builds redeploys (`npm run deploy` applies any new D1
-  migrations). If the merge conflicts, the workflow opens a pull request
-  named `upstream-sync` listing the conflicted files; resolve them with
-  the Resolve conflicts button in the GitHub web editor (or locally) and
-  merge. Nothing deploys until the conflict is resolved. Note: the
-  workflow's own push does not re-trigger your copy's GitHub Actions CI,
-  but Workers Builds still receives it and deploys.
+- **Deploy button, one click (after a one-time bootstrap).** Cloudflare's
+  deploy flow cannot push workflow files (its GitHub app lacks the
+  `workflow` scope GitHub requires for anything under `.github/workflows`),
+  so your copy starts with **no workflows at all** and the Actions tab has
+  nothing to run. Bootstrap once, entirely in the GitHub web UI: in your
+  copy, Add file > Create new file, path
+  `.github/workflows/sync-upstream.yml`, paste the contents of the
+  [upstream workflow file](https://github.com/DailenG/CheckDeployManager/blob/main/.github/workflows/sync-upstream.yml),
+  and commit. Then run it with **Adopt upstream history** checked:
+  deploy-button copies are snapshot imports with no shared git history, so
+  this first run saves your main to a backup branch, adopts upstream
+  history with your `wrangler.jsonc` kept, and brings in every other
+  workflow (CI, CodeQL) too. If you customized files other than
+  `wrangler.jsonc`, restore them from the backup branch afterward.
 
-  First run only: deploy-button copies start as a snapshot import with no
-  shared git history, so the first sync reports that a one-time step is
-  needed. Rerun the workflow with **Adopt upstream history** checked: your
-  current main is saved to a backup branch, upstream history becomes main
-  with your `wrangler.jsonc` kept, and every later sync is a normal merge.
-  If you customized files other than `wrangler.jsonc`, restore them from
-  the backup branch afterward.
+  From then on updates are one click: Actions > Sync upstream >
+  Run workflow. A clean merge is pushed immediately and Workers Builds
+  redeploys (`npm run deploy` applies any new D1 migrations). If the merge
+  conflicts, the workflow opens a pull request named `upstream-sync`
+  listing the conflicted files; resolve them with the Resolve conflicts
+  button in the GitHub web editor (or locally) and merge. Nothing deploys
+  until the conflict is resolved. Note: the workflow's own push does not
+  re-trigger your copy's GitHub Actions CI, but Workers Builds still
+  receives it and deploys.
 
 - **Deploy button, manually.** Same result from a clone of your copy:
 
@@ -246,7 +252,12 @@ How you update depends on how you deployed:
   ```
 
   (`remote add` only the first time.) The push triggers Workers Builds,
-  which runs the configured deploy command.
+  which runs the configured deploy command. On the first merge of a
+  deploy-button copy, add `--allow-unrelated-histories` (snapshot import,
+  no shared history) and expect a conflict on `wrangler.jsonc`: keep your
+  provisioned ids and vars, take upstream's new keys. Your own push also
+  carries `.github/workflows` into the copy, which the deploy flow could
+  not, so this bootstraps the one-click path as well.
 
 - **Local clone with wrangler.** `git pull`, then `npm run deploy`.
 

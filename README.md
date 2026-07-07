@@ -92,7 +92,7 @@ On your first login the dashboard opens a **setup wizard** that walks steps 5 th
 
 The full runbook with verification steps lives in [docs/runbook.md](docs/runbook.md).
 
-**Updating later:** the dashboard footer shows the running version and flags newer releases. Your copy ships with a **Sync upstream** workflow (Actions tab > Sync upstream > Run workflow): clean merges deploy automatically, conflicts become a pull request you resolve in the web editor. Manual paths and details in the runbook's [Updating a deployed instance](docs/runbook.md#updating-a-deployed-instance).
+**Updating later:** the dashboard footer shows the running version and flags newer releases. Updates run through a **Sync upstream** workflow (Actions tab > Sync upstream > Run workflow): clean merges deploy automatically, conflicts become a pull request you resolve in the web editor. One caveat: Cloudflare's deploy flow cannot copy workflow files into your repo (its GitHub app lacks the `workflow` scope), so a fresh copy needs the one-time bootstrap described in the runbook's [Updating a deployed instance](docs/runbook.md#updating-a-deployed-instance) before the Actions tab has anything to run.
 
 ## Documentation
 
