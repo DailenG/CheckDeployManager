@@ -53,7 +53,7 @@ a:hover { text-decoration: underline; }
   z-index: 10;
 }
 
-.brand { font-weight: 700; font-size: 17px; }
+.brand { font-weight: 700; font-size: 17px; color: var(--text); }
 .brand-mark { color: var(--accent); }
 
 #main-nav { display: flex; gap: 4px; flex: 1; }
