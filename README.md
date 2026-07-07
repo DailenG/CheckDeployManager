@@ -68,7 +68,7 @@ The button flow prompts for more than you might expect. Field by field:
 - **Build command.** Leave blank. There is no build step; Wrangler bundles the TypeScript and the dashboard is static files.
 - **Deploy command.** Use `npm run deploy`. This applies the D1 migrations before `wrangler deploy`; a plain `wrangler deploy` would leave the database schemaless.
 - **`ENVIRONMENT` (default `production`).** Keep it exactly `production`. The value `development` disables auth and exists only for local `wrangler dev`.
-- **A second `ENVIRONMENT` and `DEV_OPERATOR_EMAIL`.** These are picked up from `.dev.vars.example`, which exists only for local development. Leave them blank or remove them; never set `ENVIRONMENT=development` on a deployed Worker.
+- **A second `ENVIRONMENT` and `DEV_OPERATOR_EMAIL`.** These are picked up from `.dev.vars.example`, which exists only for local development. Leave them blank or remove them; never set `ENVIRONMENT=development` on a deployed Worker. The flow stores this `ENVIRONMENT` as a remote secret regardless, so the first build logs a warning that the deploy replaces it with the config value `production` — that is expected and correct.
 - **`ACCESS_TEAM_DOMAIN`.** The form may require a value. If you already know your Zero Trust team domain, enter it as a bare hostname (`<team>.cloudflareaccess.com`, no `https://`). Otherwise enter any placeholder and correct it in runbook step 3.
 - **`ACCESS_APP_AUD`.** The AUD tag does not exist until you create the Access application in runbook step 2, so enter a placeholder and fill in the real value in runbook step 3.
 

@@ -21,6 +21,11 @@
   "r2_buckets": [
     { "binding": "STORAGE", "bucket_name": "checkdeploymanager-storage" }
   ],
+  "workers_dev": true,
+  // Preview URLs would add versioned hostnames that the Access application
+  // destinations never cover; the Worker fails closed there, but the
+  // hostnames serve no purpose on a deployed instance.
+  "preview_urls": false,
   "triggers": { "crons": ["17 6 * * *"] },
   "vars": {
     "ACCESS_TEAM_DOMAIN": "",

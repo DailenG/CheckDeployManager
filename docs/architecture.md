@@ -571,21 +571,27 @@ Repo hygiene rules (enforced in CONTRIBUTING and CI lint): no secrets, no tokens
   "name": "checkdeploymanager",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-01",
-  "assets": { "directory": "src/ui", "binding": "ASSETS" },
+  "assets": {
+    "directory": "src/ui",
+    "binding": "ASSETS",
+    "run_worker_first": ["/manage", "/manage/*"]
+  },
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "checkdeploymanager-db",
-      "database_id": ""
+      "database_name": "checkdeploymanager-db"
     }
   ],
   "r2_buckets": [
     { "binding": "STORAGE", "bucket_name": "checkdeploymanager-storage" }
   ],
+  "workers_dev": true,
+  "preview_urls": false,
   "triggers": { "crons": ["17 6 * * *"] },
   "vars": {
     "ACCESS_TEAM_DOMAIN": "",
-    "ACCESS_APP_AUD": ""
+    "ACCESS_APP_AUD": "",
+    "ENVIRONMENT": "production"
   },
   "observability": { "enabled": true }
 }
@@ -593,7 +599,8 @@ Repo hygiene rules (enforced in CONTRIBUTING and CI lint): no secrets, no tokens
 
 Notes:
 
-- Bindings carry default names and blank IDs so the Deploy button (and Wrangler auto-provisioning) creates and links the resources on first deploy.
+- Bindings carry default names and omit `database_id` so the Deploy button (and Wrangler auto-provisioning) creates and links the resources on first deploy (the appendix explains why the key is omitted rather than blank).
+- `workers_dev` and `preview_urls` are declared explicitly so `wrangler deploy` does not warn about implicit defaults. Preview URLs stay off because their versioned hostnames are never covered by the Access application destinations.
 - No `routes` block ships in the repo: the custom domain is instance specific (`check.example.com` in the examples) and is attached post-deploy so deployers are not broken by a hardcoded hostname. The app derives self-referencing URLs from `instance_settings.public_base_url`.
 - `ACCESS_TEAM_DOMAIN` / `ACCESS_APP_AUD` are non-secret identifiers filled in post-deploy; until they are set, the Worker fails closed on all `/api` and `/manage` requests.
 - `package.json` deploy script runs `wrangler d1 migrations apply DB --remote` before `wrangler deploy`, referencing the binding name so migrations succeed regardless of the database name a deployer chooses (the button auto-detects and pre-populates this deploy command).
