@@ -90,7 +90,9 @@ surfaces operational signal the dashboard already collects but hides
 daily; the lockout drill is cheap insurance against the one failure mode
 that takes the whole dashboard away; rate-limiting-as-code hardens public
 endpoints but duplicates protections Cloudflare already provides by
-default, so it goes last.
+default, so it goes last. Sections 4 and up were scoped later and sit in
+arrival order, not priority; 1 and 5 share a query and are best built
+together.
 
 ## 1. Fetch metrics sparkline on the tenant list
 
@@ -238,7 +240,91 @@ blank value on the Branding tab.
 
 **Sizing:** two to three hours.
 
-## 5. Future candidates (unscoped)
+## 5. Deployment health verdicts on the tenant list
+
+**Goal:** turn the per-GUID fetch counts the service already records into
+judgments an operator can act on without reading numbers. `fetch_metrics`
+is per tenant, per GUID, per day (hits, 304 check-ins, last fetch), so the
+data for all of these already exists; what is missing is the verdict:
+
+- **Never fetched since publish.** A tenant with a published version whose
+  active GUID has zero fetch rows is a rollout that never landed (wrong
+  config URL in the RMM, policy not applied). Today this hides behind an
+  empty Last fetch cell that looks identical to "new tenant, give it time".
+- **Estimated device count and shrinkage.** Managed browsers poll every
+  `updateInterval` hours, so yesterday's `hits + not_modified` for a GUID
+  approximates its device count times `24 / updateInterval`. A material
+  day-over-day or week-over-week drop is devices going dark (policy
+  unlinked, mass uninstall) long before the stale badge trips.
+
+**Decision: verdicts computed in the list API, rendered as badges.**
+Extends the sparkline item (section 1); both read the same table and
+should land as one list-API change if built together. Thresholds start
+crude and hardcoded (never-fetched: published plus zero rows ever;
+shrinkage: yesterday under half of the trailing-week daily average with at
+least 10 expected fetches); refine only if real fleets prove them noisy.
+
+**Mechanics:**
+
+- Extend the `GET /api/tenants` list query with per-tenant aggregates over
+  `fetch_metrics` for the active GUID: total rows ever, yesterday's sum,
+  trailing 7-day daily average.
+- Resolve each tenant's effective `updateInterval` (tenant override, else
+  instance default, else 24) server-side for the estimated device count:
+  `round(yesterday / (24 / interval))`.
+- Tenant list badges: `never fetched` (accent) when published with zero
+  rows; `fleet shrinking` (warn) on the drop rule; tooltip carries the
+  numbers. Detail header shows "about N devices" with the estimate.
+- The metrics window is `metrics_retention_days` (default 7), which bounds
+  the trailing average; document that raising retention sharpens nothing
+  in these verdicts (they only look back seven days).
+
+**Tests:** seed fetch_metrics shapes for each verdict (published but never
+fetched, steady fleet, halved fleet, brand-new tenant with no publish) and
+assert the API emits the right flags and estimates; assert a 304-only
+tenant counts as healthy.
+
+**Sizing:** one day, shared with the sparkline item if done together.
+
+## 6. Analytics Engine dataset for long-horizon fetch telemetry
+
+**Goal:** D1 keeps seven days of fetch counts by default, enough for the
+dashboard's verdicts but not for "how did this quarter's rollout trend" or
+"when exactly did this GUID go quiet". Cloudflare's Workers Analytics
+Engine is purpose-built for this: unlimited-cardinality data points
+written from the Worker with a binding, queried over a roughly 90-day
+window with SQL.
+
+**Decision: write-only from the Worker; queried externally.** Writing
+needs only a Wrangler binding (no secret), fitting the zero-secret design.
+Querying requires an account API token, so in-dashboard charts are out of
+scope by design; the operator queries the SQL API directly or points
+Grafana's Cloudflare data source at it. Revisit only if the no-secrets
+rule is ever revisited.
+
+**Mechanics:**
+
+- `analytics_engine_datasets` binding (for example `FETCH_EVENTS`) in
+  `wrangler.jsonc`; the deploy button and Wrangler provision it like the
+  other bindings.
+- In the rules route, one `writeDataPoint` per request alongside the
+  existing D1 counters: blobs `[tenant_id, guid, kind]` where kind is
+  `hit`, `not_modified`, or `revoked`; doubles `[1]`; index the guid.
+  Unknown-GUID 404s are recorded as kind `unknown` with a truncated hash
+  of the path instead of the raw value, so attacker-controlled junk never
+  lands verbatim in telemetry.
+- Docs: a monitoring-guide section with two or three copy-paste SQL API
+  queries (per-GUID daily series beyond the D1 window, first/last seen
+  for a GUID, unknown-404 volume) and a pointer to the Grafana data
+  source.
+- Graceful no-op when the binding is absent (older copies mid-update).
+
+**Tests:** unit-test the data-point shape via an injected fake binding;
+assert the rules route still serves when the binding is missing.
+
+**Sizing:** half a day of code; the useful part is the documented queries.
+
+## 7. Future candidates (unscoped)
 
 - **Wiki regeneration automation.** CI cannot regenerate the GitNexus wiki
   (needs the local index and an LLM key); today the freshness nudge is a

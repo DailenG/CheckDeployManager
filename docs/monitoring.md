@@ -138,3 +138,13 @@ happening to people who should be getting in.
 | Weekly | Tenant list stale badges, Inbox, Upstream sync status, Workers Metrics volume trend |
 | After any Access or IdP change | Log in from a private window; scan Access logs for unexpected denials |
 | After any push to your repo copy | Workers Build succeeded (Deployments tab or commit check); CI green |
+
+## 8. Signals on the roadmap
+
+The service records per-GUID fetch counts (hits, 304 check-ins, last
+fetch) per day already; two scoped backlog items build on that and on
+Cloudflare's telemetry stack: deployment health verdicts on the tenant
+list (never-fetched-since-publish and fleet-shrinkage badges, estimated
+device counts) and a Workers Analytics Engine dataset for fetch history
+beyond the seven-day D1 window, queryable via the SQL API or Grafana. See
+`BACKLOG.md` sections 5 and 6.
