@@ -131,6 +131,9 @@ no rows gets seven zeros.
 **Sizing:** half a day. The query and zero-fill are the substance; the SVG
 helper is small.
 
+**Implementation plan:** [docs/plans/deployment-health.md](docs/plans/deployment-health.md)
+(shared with sections 5 and 6).
+
 ## 2. Access lockout drill runbook section
 
 **Goal:** an operator locked out of the dashboard (broken Access policy,
@@ -286,6 +289,8 @@ tenant counts as healthy.
 
 **Sizing:** one day, shared with the sparkline item if done together.
 
+**Implementation plan:** [docs/plans/deployment-health.md](docs/plans/deployment-health.md).
+
 ## 6. Analytics Engine dataset for long-horizon fetch telemetry
 
 **Goal:** D1 keeps seven days of fetch counts by default, enough for the
@@ -323,6 +328,9 @@ rule is ever revisited.
 assert the rules route still serves when the binding is missing.
 
 **Sizing:** half a day of code; the useful part is the documented queries.
+
+**Implementation plan:** [docs/plans/deployment-health.md](docs/plans/deployment-health.md),
+phase 4.
 
 ## 7. Future candidates (unscoped)
 
