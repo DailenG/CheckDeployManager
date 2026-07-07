@@ -8,7 +8,7 @@ The Deploy to Cloudflare flow asks for the following. Fields not listed here (pr
 
 | Field | What to enter |
 |---|---|
-| Git repository | The flow clones this repo into your own GitHub or GitLab account and deploys from that copy; pick the destination account and name |
+| Git repository | The flow clones this repo into your own GitHub or GitLab account and deploys from that copy; pick the destination account and name, and check **Create private Git repository** (section 0.1 has you commit your Access values to this copy). If the name already exists from a prior attempt, creation fails; rename or delete the old copy first |
 | Build command | Leave blank; there is no build step |
 | Deploy command | `npm run deploy` (runs D1 migrations, then `wrangler deploy`) |
 | `ENVIRONMENT` (default `production`) | Keep `production`; `development` disables auth and is local-only |

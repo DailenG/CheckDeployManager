@@ -63,7 +63,7 @@ curl "http://localhost:8787/__scheduled?cron=17+6+*+*+*"
 
 The button flow prompts for more than you might expect. Field by field:
 
-- **Git repository.** The flow creates a copy of this repo in your own GitHub or GitLab account and deploys from that copy. Pick the account or org and a repository name. Future pushes to your copy can redeploy the Worker via Workers Builds.
+- **Git repository.** The flow creates a copy of this repo in your own GitHub or GitLab account and deploys from that copy. Pick the account or org and a repository name, and check **Create private Git repository** — the copy is your operational config, and later runbook steps commit your Access values into it. If a repository with that name already exists (for example from a previous setup attempt), creation fails rather than reusing it; pick a different name or delete the old copy first.
 - **Project name, D1 database, R2 bucket.** Accept the defaults or rename; choose "create new" for both resources unless you are intentionally reusing existing ones.
 - **Build command.** Leave blank. There is no build step; Wrangler bundles the TypeScript and the dashboard is static files.
 - **Deploy command.** Use `npm run deploy`. This applies the D1 migrations before `wrangler deploy`; a plain `wrangler deploy` would leave the database schemaless.
