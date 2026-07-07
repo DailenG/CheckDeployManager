@@ -145,6 +145,7 @@ input[type="color"], textarea, select {
   color: var(--text);
 }
 textarea { font-family: var(--mono); font-size: 13px; min-height: 140px; }
+textarea.lines { min-height: 72px; }
 textarea.tall { min-height: 260px; }
 
 label.field { display: block; margin-bottom: 12px; }

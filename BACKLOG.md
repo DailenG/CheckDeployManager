@@ -332,7 +332,40 @@ assert the rules route still serves when the binding is missing.
 **Implementation plan:** [docs/plans/deployment-health.md](docs/plans/deployment-health.md),
 phase 4.
 
-## 7. Future candidates (unscoped)
+## 7. Sync upstream cannot push workflow-file changes
+
+**Goal:** a real copy hit this: when an upstream release modifies anything
+under `.github/workflows/`, the Sync upstream workflow's push is rejected
+with `refusing to allow a GitHub App to create or update workflow ...
+without workflows permission`. The default `GITHUB_TOKEN` can never hold
+the `workflows` scope, so both the direct push and the conflict-PR branch
+push fail, and the run ends in a raw git error instead of guidance.
+
+**Decision: optional token, mandatory clear failure.** Two changes to
+`sync-upstream.yml`:
+
+- Accept an optional repository secret (`SYNC_TOKEN`, a fine-grained PAT
+  with contents write plus workflows) used for checkout/push when present,
+  falling back to `github.token` otherwise. Operators who set it keep the
+  one-click path even across workflow-file releases; nobody is required
+  to.
+- Preflight: after fetching upstream, if the pending merge touches
+  `.github/workflows/**` and no `SYNC_TOKEN` is configured, stop before
+  merging and write a step summary explaining the three ways out: add the
+  secret and rerun, run the manual merge locally (an operator's own push
+  carries the scope), or edit the changed workflow files once in the web
+  UI and rerun.
+
+Runbook's updating section gains the same explanation. Note the secret
+lives in GitHub Actions, not the Worker; the zero-Worker-secrets rule is
+untouched.
+
+**Tests:** none runnable in CI (the failure mode needs a foreign repo);
+verify by syncing a real copy across a workflow-touching release.
+
+**Sizing:** two hours.
+
+## 8. Future candidates (unscoped)
 
 - **Wiki regeneration automation.** CI cannot regenerate the GitNexus wiki
   (needs the local index and an LLM key); today the freshness nudge is a

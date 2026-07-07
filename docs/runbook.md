@@ -123,10 +123,23 @@ reference for what the wizard automates.
 
 ### Publishing a rules change
 
-1. Tenant > Rules draft: edit the delta JSON. Keys: `add_exclusion_domain_patterns`, `add_trusted_login_patterns`, `add_phishing_indicators`, `suppress_indicator_ids`, `raw_overrides`.
+1. Tenant > Rules draft: the guided editor covers the common keys as
+   one-entry-per-line fields (exclusion patterns, trusted login patterns,
+   suppressed indicator ids); added indicators and raw overrides live under
+   **Advanced** as JSON. **Edit raw JSON** toggles the whole delta as one
+   document (keys: `add_exclusion_domain_patterns`,
+   `add_trusted_login_patterns`, `add_phishing_indicators`,
+   `suppress_indicator_ids`, `raw_overrides`); both views edit the same
+   delta.
 2. **Save and validate** runs the gates in dry-run and reports findings.
+   The effect summary under the editor describes the saved draft and its
+   differences from the currently published version.
 3. Use the tenant preview URL in a test browser to confirm behavior against the live draft.
-4. **Publish**. The merge runs against the active upstream snapshot, writes an immutable version to R2, and moves the serving pointer. Extensions pick it up within their update interval (24 h by default; `max-age` on the endpoint is 300 s).
+4. **Publish**. Publish always ships the last *saved* draft; the page warns
+   if the editor holds unsaved edits. The merge runs against the active
+   upstream snapshot, writes an immutable version to R2, and moves the
+   serving pointer. Extensions pick it up within their update interval
+   (24 h by default; `max-age` on the endpoint is 300 s).
 
 ### Rolling back
 
