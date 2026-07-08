@@ -1,16 +1,34 @@
 # CheckDeployManager
 
-Multi tenant configuration service for the [Check by CyberDrain](https://docs.check.tech) browser extension, hosted entirely on Cloudflare Workers. Built for MSPs that manage Check across many client organizations, and comfortably inside the Cloudflare free tier at a few thousand endpoints.
+Multi-tenant configuration service for the [Check by CyberDrain](https://docs.check.tech) browser extension, hosted entirely on Cloudflare Workers. Built for MSPs that manage Check across many client organizations, and comfortably inside the Cloudflare free tier at a few thousand endpoints.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/DailenG/CheckDeployManager) [![CI](https://github.com/DailenG/CheckDeployManager/actions/workflows/ci.yml/badge.svg)](https://github.com/DailenG/CheckDeployManager/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Code wiki: GitNexus](https://img.shields.io/badge/code%20wiki-GitNexus-6e40c9)](docs/wiki/README.md)
 
 ## What it does
 
-- **Rules host.** Mirrors the upstream CyberDrain detection rules daily, layers an optional instance-wide baseline delta (standard MSP exclusions, set once) and a small per tenant delta on top (extra exclusions, trusted patterns, custom indicators, suppressions), validates everything, and serves each client an immutable published ruleset at an unguessable URL: `/rules/{guid}.json`.
-- **Policy generator.** Renders ready-to-deploy managed policy artifacts per tenant: Chrome and Edge managed storage JSON, Firefox `policies.json` (fragment and full file), `.reg` files for GPO, a ready-to-run GPO creation script (`New-GPO` / `Set-GPRegistryValue`, provably in sync with the `.reg` files), a standalone RMM deployment script with per-browser toggles, the variable block for Check's Intune setup script, and the field values for CIPP's Check deployment standard. Every registry-based artifact force-installs the extension and pins it to the toolbar.
-- **Operations dashboard.** Draft and publish with validation gates, one-click rollback, GUID rotation and revocation with hit counters, tenant branding with logo hosting, instance-level tenant defaults (set MSP-standard branding, logo, and policy once; every tenant inherits until it overrides), a webhook inbox for false positive reports with an optional relay that forwards each report to n8n, Power Automate, or any webhook receiver, upstream diff history, and an indefinite audit log. Guided wizards cover first-run setup and per-tenant onboarding, each ending in verifiable state, and clients already on the official Check GPO can have their existing config adopted via a read-only export script (`scripts/Export-CheckGpoConfig.ps1`). Dark mode by default.
+**Hosts each client's detection rules.** The upstream CyberDrain rules sync daily. On top of them, you can layer an instance-wide baseline delta (your standard MSP exclusions, set once) and a small per-tenant delta (a client's own exclusions, trusted patterns, indicators, suppressions). Every publish is validated, immutable, served at an unguessable per-client URL (`/rules/{guid}.json`), and reversible with one-click rollback.
 
-Two delivery paths stay separate by design: detection rules are URL fetched by the extension on its own schedule, while branding and enforcement settings are pushed to browsers via managed storage policy.
+**Generates every deployment artifact per tenant:**
+
+- Chrome and Edge managed storage JSON
+- Firefox `policies.json` (fragment and full file)
+- `.reg` files plus a ready-to-run GPO creation script, both rendered from one shared table so they can never drift
+- a standalone RMM deployment script with per-browser toggles
+- the variable block for Check's Intune setup script
+- the field values for CIPP's Check deployment standard
+
+Every registry-based artifact force-installs the extension and pins it to the toolbar, so users can always see the protection they have.
+
+**Runs the fleet from one dashboard** (behind Cloudflare Access, dark mode by default):
+
+- Draft, validate, and publish rules; roll back in one click; rotate or revoke client GUIDs and watch stragglers via hit counters
+- Brand per client (logo, colors, support info), with MSP-wide defaults every tenant inherits until it overrides
+- Triage false-positive reports in a webhook inbox, optionally relayed to n8n, Power Automate, or any webhook receiver
+- Follow guided wizards for first-run setup and for onboarding each client, ending at a deployment checklist and first-fetch verification
+- Migrate clients already on the official Check GPO: a read-only script exports their existing config and the wizard adopts it
+- Review upstream diff history and an indefinite audit log
+
+Two delivery paths stay separate by design: browsers fetch detection rules from this service on their own schedule, while branding and enforcement settings are deployed to devices as managed policy. Rule changes reach the fleet automatically; policy changes ride your next deployment push.
 
 ## Screenshots
 
