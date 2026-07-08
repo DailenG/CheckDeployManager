@@ -108,6 +108,12 @@ Current work queue, in order. Update as items land.
       allowlist save path (found by a real migration), and an Onboard
       wizard link leading the tenant tab strip.
 
+- [x] v0.6.2 release: the baseline rules delta gained the tenant Rules
+      draft's guided editor (Easy add pattern builder, one-per-line list
+      fields, Advanced JSON, raw toggle, saved-baseline summary) via
+      shared deltaEditorHtml/wireDeltaEditor helpers, plus a README
+      feature-section rewrite for scanability.
+
 Queue complete.
 
 The numbered sections below are scoped and ready to start, in priority
