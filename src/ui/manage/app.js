@@ -439,7 +439,7 @@ const DELTA_LIST_FIELDS = [
   [
     "suppress_indicator_ids",
     "Suppressed upstream indicator ids",
-    "One id per line; removes that upstream indicator for this tenant",
+    "One id per line; removes that upstream indicator where this delta applies",
   ],
 ];
 
@@ -514,25 +514,45 @@ function parseDeltaText(text) {
   return null;
 }
 
-async function renderRulesTab(container, tenantId, detail) {
-  const storedText = detail.draft ? detail.draft.draft_json : "{}";
-  const storedDelta = parseDeltaText(storedText);
-  // Saved-draft state feeding the effect summary; updated after each save.
-  let savedDelta = detail.draft ? storedDelta : null;
-  let dirty = false;
-  // Guided mode needs a parseable object to decompose; raw is the fallback.
-  let mode = storedDelta !== null ? "guided" : "raw";
+function pluralCount(count, word) {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
 
+/* One-line count of what a delta contains; shared by the tenant rules
+   effect summary and the instance baseline summary. */
+function deltaCountsSummary(delta) {
+  const listOf = (key) => (Array.isArray(delta[key]) ? delta[key] : []);
+  const overrideCount =
+    delta.raw_overrides !== null && typeof delta.raw_overrides === "object"
+      ? Object.keys(delta.raw_overrides).length
+      : 0;
+  return [
+    pluralCount(listOf("add_exclusion_domain_patterns").length, "exclusion pattern"),
+    pluralCount(listOf("add_trusted_login_patterns").length, "trusted login pattern"),
+    pluralCount(listOf("suppress_indicator_ids").length, "suppressed indicator id"),
+    pluralCount(listOf("add_phishing_indicators").length, "added indicator"),
+    overrideCount > 0 ? `raw overrides on ${pluralCount(overrideCount, "key")}` : "no raw overrides",
+  ].join(", ");
+}
+
+/* Guided/raw delta editor markup, shared by the tenant Rules draft and the
+   instance baseline delta. Renders the easy-add pattern builder, the
+   one-entry-per-line list fields, an Advanced JSON block for the remaining
+   keys, a raw-JSON fallback, the mode toggle, and an empty summary slot the
+   caller fills. IDs are container-scoped, so two editors never collide. */
+function deltaEditorHtml(initialText) {
+  const storedDelta = parseDeltaText(initialText);
   const listKeys = DELTA_LIST_FIELDS.map(([key]) => key);
   const advancedInitial = {};
   for (const [key, value] of Object.entries(storedDelta ?? {})) {
     if (!listKeys.includes(key)) advancedInitial[key] = value;
   }
   const hasAdvanced = Object.keys(advancedInitial).length > 0;
+  const mode = storedDelta !== null ? "guided" : "raw";
 
-  let rawText = storedText;
+  let rawText = initialText;
   try {
-    rawText = JSON.stringify(JSON.parse(storedText), null, 2);
+    rawText = JSON.stringify(JSON.parse(initialText), null, 2);
   } catch {
     /* show as stored */
   }
@@ -547,58 +567,52 @@ async function renderRulesTab(container, tenantId, detail) {
     </label>`,
   ).join("");
 
-  container.innerHTML = `
-    <div class="panel">
-      <p class="muted">The delta layers onto the upstream rules at publish:
-        patterns and indicators append, suppressed ids remove upstream
-        indicators, raw overrides deep-merge last. The instance baseline
-        delta (Settings page) applies beneath all of it.</p>
-      <div id="guided" ${mode === "raw" ? "hidden" : ""}>
-        <div class="easy-add">
-          <strong>Easy add</strong>
-          <span class="muted">builds the pattern regex from a plain domain,
-            no regex knowledge needed</span>
-          <div class="row" style="align-items:center;flex-wrap:wrap;margin-top:8px">
-            <input type="text" id="pb-domain" placeholder="training.knowbe4.com or a full URL" style="flex:1;min-width:220px">
-            <label class="check"><input type="checkbox" id="pb-subs" checked> include subdomains</label>
-            <select id="pb-target">
-              <option value="add_exclusion_domain_patterns">as exclusion pattern</option>
-              <option value="add_trusted_login_patterns">as trusted login pattern</option>
-            </select>
-            <button id="pb-add" class="primary small">Add</button>
-          </div>
+  return `
+    <div id="guided" ${mode === "raw" ? "hidden" : ""}>
+      <div class="easy-add">
+        <strong>Easy add</strong>
+        <span class="muted">builds the pattern regex from a plain domain,
+          no regex knowledge needed</span>
+        <div class="row" style="align-items:center;flex-wrap:wrap;margin-top:8px">
+          <input type="text" id="pb-domain" placeholder="training.knowbe4.com or a full URL" style="flex:1;min-width:220px">
+          <label class="check"><input type="checkbox" id="pb-subs" checked> include subdomains</label>
+          <select id="pb-target">
+            <option value="add_exclusion_domain_patterns">as exclusion pattern</option>
+            <option value="add_trusted_login_patterns">as trusted login pattern</option>
+          </select>
+          <button id="pb-add" class="primary small">Add</button>
         </div>
-        ${guidedFields}
-        <details id="advanced-block" ${hasAdvanced ? "open" : ""}>
-          <summary>Advanced: added indicators and raw overrides (JSON:
-            <span class="mono">add_phishing_indicators, raw_overrides</span>)</summary>
-          <textarea id="d-advanced" class="tall" spellcheck="false">${esc(
-            JSON.stringify(advancedInitial, null, 2),
-          )}</textarea>
-        </details>
       </div>
-      <textarea id="draft" class="tall" spellcheck="false" ${
-        mode === "guided" ? "hidden" : ""
-      }>${esc(rawText)}</textarea>
-      <div class="row" style="margin-top:6px">
-        <button id="toggle-mode" class="ghost small">${
-          mode === "guided" ? "Edit raw JSON" : "Guided editor"
-        }</button>
-      </div>
-      <div id="effect"></div>
-      <div id="findings"></div>
-      <div class="row" style="margin-top:10px">
-        <button id="save-draft">Save and validate</button>
-        <button id="publish" class="primary">Publish</button>
-        <span class="muted" id="last-saved">${
-          detail.draft
-            ? `Last saved ${fmtTime(detail.draft.updated_at)} by ${esc(detail.draft.updated_by)}`
-            : "No draft saved yet"
-        }</span>
-      </div>
-    </div>`;
+      ${guidedFields}
+      <details id="advanced-block" ${hasAdvanced ? "open" : ""}>
+        <summary>Advanced: added indicators and raw overrides (JSON:
+          <span class="mono">add_phishing_indicators, raw_overrides</span>)</summary>
+        <textarea id="d-advanced" class="tall" spellcheck="false">${esc(
+          JSON.stringify(advancedInitial, null, 2),
+        )}</textarea>
+      </details>
+    </div>
+    <textarea id="draft" class="tall" spellcheck="false" ${
+      mode === "guided" ? "hidden" : ""
+    }>${esc(rawText)}</textarea>
+    <div class="row" style="margin-top:6px">
+      <button id="toggle-mode" class="ghost small">${
+        mode === "guided" ? "Edit raw JSON" : "Guided editor"
+      }</button>
+    </div>
+    <div id="effect"></div>`;
+}
 
+/* Wires up a deltaEditorHtml block inside `container`. `initialSaved` is the
+   delta the summary treats as committed (null when nothing is saved yet);
+   `summarize(savedDelta, dirty)` returns the HTML for the summary slot.
+   Returns handles the caller's own save button uses. */
+function wireDeltaEditor(container, { initialText, initialSaved, summarize }) {
   const el = (id) => container.querySelector(`#${id}`);
+  const listKeys = DELTA_LIST_FIELDS.map(([key]) => key);
+  let savedDelta = initialSaved;
+  let dirty = false;
+  let mode = parseDeltaText(initialText) !== null ? "guided" : "raw";
 
   // Composes the delta from whichever editor is active. Throws with a
   // user-facing message when JSON is involved and broken.
@@ -625,93 +639,17 @@ async function renderRulesTab(container, tenantId, detail) {
     return delta;
   };
 
-  /* Effect summary: what the SAVED draft contains and how it differs from
-     the currently published version's frozen delta. Editors change nothing
-     here until saved; that is the point. */
-  const publishedDelta = detail.current_version
-    ? parseDeltaText(detail.current_version.delta_json)
-    : null;
-  const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
-  const listDiff = (saved, published) => {
-    const savedSet = new Set(saved);
-    const publishedSet = new Set(published);
-    return {
-      added: saved.filter((item) => !publishedSet.has(item)),
-      removed: published.filter((item) => !savedSet.has(item)),
-    };
+  const renderSummary = () => {
+    el("effect").innerHTML = summarize(savedDelta, dirty);
   };
-  const renderEffect = () => {
-    const target = el("effect");
-    if (savedDelta === null) {
-      target.innerHTML = `<p class="muted">No saved draft: publishing uses an
-        empty delta, so this tenant gets the upstream rules plus the instance
-        baseline only.</p>`;
-      return;
-    }
-    const listOf = (key) => (Array.isArray(savedDelta[key]) ? savedDelta[key] : []);
-    const overrideCount =
-      savedDelta.raw_overrides !== null &&
-      typeof savedDelta.raw_overrides === "object"
-        ? Object.keys(savedDelta.raw_overrides).length
-        : 0;
-    const parts = [
-      plural(listOf("add_exclusion_domain_patterns").length, "exclusion pattern"),
-      plural(listOf("add_trusted_login_patterns").length, "trusted login pattern"),
-      plural(listOf("suppress_indicator_ids").length, "suppressed indicator id"),
-      plural(listOf("add_phishing_indicators").length, "added indicator"),
-      overrideCount > 0 ? `raw overrides on ${plural(overrideCount, "key")}` : "no raw overrides",
-    ];
+  renderSummary();
 
-    let vsPublished;
-    if (detail.current_version === null) {
-      vsPublished = "Never published: publishing creates v1 from this draft.";
-    } else if (publishedDelta === null) {
-      vsPublished = "";
-    } else {
-      const versionNumber = detail.current_version.version_number;
-      const diffs = [];
-      for (const [key, , label] of [
-        ["add_exclusion_domain_patterns", 0, "exclusion pattern"],
-        ["add_trusted_login_patterns", 0, "trusted login pattern"],
-        ["suppress_indicator_ids", 0, "suppressed id"],
-      ]) {
-        const published = Array.isArray(publishedDelta[key]) ? publishedDelta[key] : [];
-        const { added, removed } = listDiff(listOf(key), published);
-        if (added.length > 0) {
-          diffs.push(
-            `<span title="${esc(added.join("\n"))}">+${plural(added.length, label)}</span>`,
-          );
-        }
-        if (removed.length > 0) {
-          diffs.push(
-            `<span title="${esc(removed.join("\n"))}">-${plural(removed.length, label)}</span>`,
-          );
-        }
-      }
-      for (const [key, label] of [
-        ["add_phishing_indicators", "added indicators"],
-        ["raw_overrides", "raw overrides"],
-      ]) {
-        if (JSON.stringify(savedDelta[key] ?? null) !== JSON.stringify(publishedDelta[key] ?? null)) {
-          diffs.push(`${label} changed`);
-        }
-      }
-      vsPublished =
-        diffs.length > 0
-          ? `Vs published v${esc(versionNumber)}: ${diffs.join(", ")}. Hover a count for the items.`
-          : `No differences from published v${esc(versionNumber)}: publishing would mint an identical new version.`;
-    }
-    target.innerHTML = `<p class="muted">Saved draft: ${parts.join(", ")}.<br>
-      ${vsPublished}${dirty ? '<br><span class="badge warn">unsaved edits</span> the summary and Publish use the last saved draft' : ""}</p>`;
-  };
-  renderEffect();
-
-  // Any edit anywhere marks the draft dirty until the next successful save.
+  // Any edit anywhere marks the editor dirty until the next successful save.
   for (const id of ["draft", "d-advanced", ...listKeys.map((key) => `d-${key}`)]) {
     el(id).addEventListener("input", () => {
       if (!dirty) {
         dirty = true;
-        renderEffect();
+        renderSummary();
       }
     });
   }
@@ -774,10 +712,117 @@ async function renderRulesTab(container, tenantId, detail) {
     el("toggle-mode").textContent = mode === "guided" ? "Edit raw JSON" : "Guided editor";
   });
 
+  return {
+    composeDelta,
+    getDirty: () => dirty,
+    markSaved: (delta) => {
+      savedDelta = delta;
+      dirty = false;
+      renderSummary();
+    },
+  };
+}
+
+async function renderRulesTab(container, tenantId, detail) {
+  const storedText = detail.draft ? detail.draft.draft_json : "{}";
+  const storedDelta = parseDeltaText(storedText);
+
+  container.innerHTML = `
+    <div class="panel">
+      <p class="muted">The delta layers onto the upstream rules at publish:
+        patterns and indicators append, suppressed ids remove upstream
+        indicators, raw overrides deep-merge last. The instance baseline
+        delta (Settings page) applies beneath all of it.</p>
+      ${deltaEditorHtml(storedText)}
+      <div id="findings"></div>
+      <div class="row" style="margin-top:10px">
+        <button id="save-draft">Save and validate</button>
+        <button id="publish" class="primary">Publish</button>
+        <span class="muted" id="last-saved">${
+          detail.draft
+            ? `Last saved ${fmtTime(detail.draft.updated_at)} by ${esc(detail.draft.updated_by)}`
+            : "No draft saved yet"
+        }</span>
+      </div>
+    </div>`;
+
+  const el = (id) => container.querySelector(`#${id}`);
+
+  /* Effect summary: what the SAVED draft contains and how it differs from
+     the currently published version's frozen delta. Editors change nothing
+     here until saved; that is the point. */
+  const publishedDelta = detail.current_version
+    ? parseDeltaText(detail.current_version.delta_json)
+    : null;
+  const listDiff = (saved, published) => {
+    const savedSet = new Set(saved);
+    const publishedSet = new Set(published);
+    return {
+      added: saved.filter((item) => !publishedSet.has(item)),
+      removed: published.filter((item) => !savedSet.has(item)),
+    };
+  };
+  const summarize = (savedDelta, dirty) => {
+    if (savedDelta === null) {
+      return `<p class="muted">No saved draft: publishing uses an empty
+        delta, so this tenant gets the upstream rules plus the instance
+        baseline only.</p>`;
+    }
+    const listOf = (key) => (Array.isArray(savedDelta[key]) ? savedDelta[key] : []);
+
+    let vsPublished;
+    if (detail.current_version === null) {
+      vsPublished = "Never published: publishing creates v1 from this draft.";
+    } else if (publishedDelta === null) {
+      vsPublished = "";
+    } else {
+      const versionNumber = detail.current_version.version_number;
+      const diffs = [];
+      for (const [key, label] of [
+        ["add_exclusion_domain_patterns", "exclusion pattern"],
+        ["add_trusted_login_patterns", "trusted login pattern"],
+        ["suppress_indicator_ids", "suppressed id"],
+      ]) {
+        const published = Array.isArray(publishedDelta[key]) ? publishedDelta[key] : [];
+        const { added, removed } = listDiff(listOf(key), published);
+        if (added.length > 0) {
+          diffs.push(
+            `<span title="${esc(added.join("\n"))}">+${pluralCount(added.length, label)}</span>`,
+          );
+        }
+        if (removed.length > 0) {
+          diffs.push(
+            `<span title="${esc(removed.join("\n"))}">-${pluralCount(removed.length, label)}</span>`,
+          );
+        }
+      }
+      for (const [key, label] of [
+        ["add_phishing_indicators", "added indicators"],
+        ["raw_overrides", "raw overrides"],
+      ]) {
+        if (JSON.stringify(savedDelta[key] ?? null) !== JSON.stringify(publishedDelta[key] ?? null)) {
+          diffs.push(`${label} changed`);
+        }
+      }
+      vsPublished =
+        diffs.length > 0
+          ? `Vs published v${esc(versionNumber)}: ${diffs.join(", ")}. Hover a count for the items.`
+          : `No differences from published v${esc(versionNumber)}: publishing would mint an identical new version.`;
+    }
+    return `<p class="muted">Saved draft: ${deltaCountsSummary(savedDelta)}.<br>
+      ${vsPublished}${dirty ? '<br><span class="badge warn">unsaved edits</span> the summary and Publish use the last saved draft' : ""}</p>`;
+  };
+
+  const editor = wireDeltaEditor(container, {
+    initialText: storedText,
+    initialSaved: detail.draft ? storedDelta : null,
+    summarize,
+  });
+
   el("save-draft").addEventListener("click", async () => {
     let delta;
     try {
-      delta = composeDelta();
+      delta = editor.composeDelta();
     } catch (error) {
       renderFindings(container, [error.message]);
       return;
@@ -786,19 +831,17 @@ async function renderRulesTab(container, tenantId, detail) {
       const result = await api(`/tenants/${tenantId}/rules`, jsonBody("PUT", { delta }));
       renderFindings(container, result.findings);
       toast(result.valid ? "Draft saved, gates pass" : "Draft saved with findings", !result.valid);
-      savedDelta = delta;
-      dirty = false;
+      editor.markSaved(delta);
       el("last-saved").textContent = `Last saved ${fmtTime(new Date().toISOString())} by ${
         onboardingStatus ? onboardingStatus.operator_email : "you"
       }`;
-      renderEffect();
     } catch (error) {
       toast(error.message, true);
     }
   });
 
   el("publish").addEventListener("click", async () => {
-    const message = dirty
+    const message = editor.getDirty()
       ? "You have unsaved edits. Publish uses the last SAVED draft, not what is in the editor. Publish the saved draft anyway?"
       : "Publish the saved draft for this tenant?";
     if (!confirm(message)) return;
@@ -1552,14 +1595,13 @@ async function renderSettings() {
       <button id="save-defaults" class="primary">Save tenant defaults</button>
     </div>
     <h2>Baseline rules delta</h2>
-    <p class="muted">Applied beneath every tenant delta at merge time; standard MSP exclusions
-      such as RMM domains belong here. Same keys as a tenant delta:
-      <span class="mono">add_exclusion_domain_patterns, add_trusted_login_patterns,
-      add_phishing_indicators, suppress_indicator_ids, raw_overrides</span>.
-      A change takes effect on each tenant's next publish; use Republish all tenants
-      to roll it out immediately.</p>
+    <p class="muted">A delta applied beneath every tenant's own delta at merge
+      time; standard MSP exclusions such as RMM domains belong here. Same
+      editor as a tenant's Rules draft, including the Easy add pattern
+      builder. A change takes effect on each tenant's next publish; use
+      Republish all tenants to roll it out immediately.</p>
     <div class="panel">
-      <textarea id="baseline-delta" class="tall" spellcheck="false">${esc(prettyBaseline)}</textarea>
+      ${deltaEditorHtml(prettyBaseline)}
       <div class="row" style="margin-top:10px">
         <button id="save-baseline" class="primary">Save baseline delta</button>
         <button id="republish-all">Republish all tenants</button>
@@ -1661,27 +1703,44 @@ async function renderSettings() {
     }
   });
 
+  const baselineSummarize = (saved, dirty) => {
+    const dirtyBadge = dirty
+      ? '<br><span class="badge warn">unsaved edits</span> save to apply on each tenant\'s next publish'
+      : "";
+    if (saved === null || Object.keys(saved).length === 0) {
+      return `<p class="muted">Empty baseline: tenants get the upstream rules
+        plus their own delta only.${dirtyBadge}</p>`;
+    }
+    return `<p class="muted">Baseline: ${deltaCountsSummary(saved)}. Applied
+      beneath every tenant delta on that tenant's next publish; use Republish
+      all tenants to roll it out now.${dirtyBadge}</p>`;
+  };
+  const baselineEditor = wireDeltaEditor(view, {
+    initialText: prettyBaseline,
+    initialSaved: parseDeltaText(prettyBaseline),
+    summarize: baselineSummarize,
+  });
+
   document.getElementById("save-baseline").addEventListener("click", async () => {
-    let parsed;
+    let delta;
     try {
-      parsed = JSON.parse(document.getElementById("baseline-delta").value);
+      delta = baselineEditor.composeDelta();
     } catch (error) {
-      toast(`baseline delta is not valid JSON: ${error.message}`, true);
+      toast(error.message, true);
       return;
     }
-    const value =
-      parsed && typeof parsed === "object" && Object.keys(parsed).length > 0
-        ? JSON.stringify(parsed)
-        : "";
+    const value = Object.keys(delta).length > 0 ? JSON.stringify(delta) : "";
     try {
       await api(
         "/instance/settings",
         jsonBody("PUT", { settings: { baseline_rule_delta: value } }),
       );
       toast("Baseline delta saved; it applies on each tenant's next publish");
-      route();
+      baselineEditor.markSaved(delta);
     } catch (error) {
-      toast(error.message, true);
+      // The server validates the delta; surface its findings when present.
+      const errors = error.body && error.body.errors;
+      toast(errors ? errors.join("; ") : error.message, true);
     }
   });
 

@@ -225,6 +225,11 @@ every tenant delta at publish time. Standard MSP exclusions -- RMM domains,
 your PSA, tools every client runs -- belong here instead of being pasted
 into each tenant's delta.
 
+- The panel uses the same guided editor as a tenant's Rules draft: the
+  Easy add pattern builder (domain in, anchored regex out),
+  one-entry-per-line fields for exclusions, trusted patterns, and
+  suppressed ids, an Advanced JSON block for indicators and raw overrides,
+  a raw-JSON toggle, and a summary of what the saved baseline contains.
 - Order: upstream rules, then the baseline delta, then the tenant delta.
   A tenant can suppress an indicator the baseline added; if both add the
   same indicator id, the duplicate-id validation gate blocks the publish.
