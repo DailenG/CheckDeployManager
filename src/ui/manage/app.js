@@ -925,7 +925,8 @@ async function renderBrandingTab(container, tenantId, detail) {
       <p class="muted"><span class="badge">inherited</span> No tenant logo uploaded; the instance
       default logo (Settings page) is served instead.</p>`;
   } else {
-    logoHtml = '<p class="muted">No logo uploaded. Check recommends 48x48, maximum 128x128.</p>';
+    logoHtml = `<p class="muted">No logo uploaded; the extension shows Check's built-in logo.
+      Check recommends 48x48, maximum 128x128.</p>`;
   }
 
   container.innerHTML = `
@@ -952,9 +953,7 @@ async function renderBrandingTab(container, tenantId, detail) {
         ${
           branding.use_default_logo
             ? '<button id="inherit-logo">Inherit the instance default logo</button>'
-            : branding.logo_r2_key || data.default_logo
-              ? '<button id="use-default-logo" title="No custom logo is served; the extension shows Check\'s own logo">Use Check\'s default logo</button>'
-              : ""
+            : '<button id="use-default-logo" title="No custom logo is served, now or if an instance default logo is added later; the extension shows Check\'s own logo">Use Check\'s default logo</button>'
         }
       </div>
     </div>`;
