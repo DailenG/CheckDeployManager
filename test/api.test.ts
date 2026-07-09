@@ -558,9 +558,13 @@ describe("tenant defaults", () => {
     );
     await api("/api/instance/default-logo", { method: "PUT", body: form });
     const created = await createTenantViaApi();
+    await api(
+      `/api/tenants/${created.id}/branding`,
+      jsonInit("PUT", { primary_color: "#123456" }),
+    );
 
-    // Opting out stops the asset URL and drops it from artifacts, so the
-    // extension falls back to its built-in logo.
+    // Opting out stops the asset URL, drops it from artifacts, and pins the
+    // primary color to Check's default over the tenant's own value.
     const optOut = await api(
       `/api/tenants/${created.id}/branding`,
       jsonInit("PUT", { use_default_logo: true }),
@@ -574,6 +578,9 @@ describe("tenant defaults", () => {
     ).json<any>();
     expect(artifacts.logo_url).toBe("");
     expect(artifacts.chrome_managed_storage.customBranding.logoUrl).toBe("");
+    expect(artifacts.chrome_managed_storage.customBranding.primaryColor).toBe(
+      "#F77F00",
+    );
 
     // Uploading a custom logo clears the opt-out.
     const tenantForm = new FormData();

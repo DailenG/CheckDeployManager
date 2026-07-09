@@ -919,7 +919,8 @@ async function renderBrandingTab(container, tenantId, detail) {
     logoHtml = `<img class="logo-preview" alt="Tenant logo" src="/assets/${esc(activeGuid)}/logo?ts=${Date.now()}">`;
   } else if (branding.use_default_logo) {
     logoHtml = `<p class="muted"><span class="badge">Check default</span> This tenant uses Check's
-      built-in logo${data.default_logo ? "; the instance default logo (Settings page) is skipped" : ""}.</p>`;
+      built-in logo and default color${data.default_logo ? "; the instance default logo (Settings page) is skipped" : ""}.
+      The Primary color field below is kept but not applied while this is on.</p>`;
   } else if (data.default_logo && activeGuid) {
     logoHtml = `<img class="logo-preview" alt="Inherited default logo" src="/assets/${esc(activeGuid)}/logo?ts=${Date.now()}">
       <p class="muted"><span class="badge">inherited</span> No tenant logo uploaded; the instance
@@ -952,8 +953,8 @@ async function renderBrandingTab(container, tenantId, detail) {
         ${branding.logo_r2_key ? '<button id="remove-logo" class="danger">Remove logo</button>' : ""}
         ${
           branding.use_default_logo
-            ? '<button id="inherit-logo">Inherit the instance default logo</button>'
-            : '<button id="use-default-logo" title="No custom logo is served, now or if an instance default logo is added later; the extension shows Check\'s own logo">Use Check\'s default logo</button>'
+            ? '<button id="inherit-logo">Use tenant and instance branding again</button>'
+            : '<button id="use-default-logo" title="No custom logo or color is applied, now or if instance defaults are added later; the extension shows Check\'s own logo and color">Use Check\'s default logo and color</button>'
         }
       </div>
     </div>`;
@@ -997,7 +998,7 @@ async function renderBrandingTab(container, tenantId, detail) {
           `/tenants/${tenantId}/branding`,
           jsonBody("PUT", { use_default_logo: true }),
         );
-        toast("Using Check's default logo");
+        toast("Using Check's default logo and color");
         route();
       } catch (error) {
         toast(error.message, true);
@@ -1012,7 +1013,7 @@ async function renderBrandingTab(container, tenantId, detail) {
           `/tenants/${tenantId}/branding`,
           jsonBody("PUT", { use_default_logo: false }),
         );
-        toast("Inheriting the instance default logo");
+        toast("Tenant and instance branding apply again");
         route();
       } catch (error) {
         toast(error.message, true);

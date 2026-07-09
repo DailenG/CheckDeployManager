@@ -43,8 +43,8 @@ export interface TenantBrandingRow {
   primary_color: string;
   logo_r2_key: string | null;
   logo_content_type: string | null;
-  // 1 opts the tenant out of the instance default logo so the Check
-  // extension's built-in logo shows; 0 inherits the default as usual.
+  // 1 opts the tenant out of the instance defaults so the Check extension's
+  // built-in logo and default primary color show; 0 inherits as usual.
   use_default_logo: number;
 }
 

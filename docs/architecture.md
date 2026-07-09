@@ -125,7 +125,7 @@ CREATE TABLE tenant_branding (
     primary_color TEXT DEFAULT '#F77F00',
     logo_r2_key TEXT,                   -- assets/{tenant_id}/logo.{ext}
     logo_content_type TEXT,
-    use_default_logo INTEGER DEFAULT 0  -- 1 = show Check's built-in logo, skip the instance default
+    use_default_logo INTEGER DEFAULT 0  -- 1 = Check's built-in logo and default color, skip the instance defaults
 );
 
 CREATE TABLE tenant_policy_settings (
@@ -288,7 +288,7 @@ Static dashboard at `/manage` (dark mode default). JSON API under `/api`:
 | `/api/tenants/{id}/publish` | POST | Gate, merge, write R2 version, move pointer, audit |
 | `/api/tenants/{id}/rollback/{versionId}` | POST | Point tenant at a prior immutable version, audit |
 | `/api/tenants/{id}/versions` | GET | Version history with diff summaries |
-| `/api/tenants/{id}/branding` | GET, PUT | Branding fields; logo upload via multipart (validated: png/jpg/svg, 512 KB cap, https serving); `use_default_logo` opts the tenant out of the instance default in favor of Check's built-in logo |
+| `/api/tenants/{id}/branding` | GET, PUT | Branding fields; logo upload via multipart (validated: png/jpg/svg, 512 KB cap, https serving); `use_default_logo` opts the tenant out of the instance defaults in favor of Check's built-in logo and default primary color |
 | `/api/tenants/{id}/policy` | GET, PUT | Managed-schema toggles (2.1 settings_json) |
 | `/api/tenants/{id}/artifacts` | GET | Generated policy outputs (section 5), rendered fresh |
 | `/api/tenants/{id}/guids` | GET, POST | List / rotate (mint new active GUID) |

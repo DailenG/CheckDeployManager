@@ -117,6 +117,11 @@ function resolvePolicy(
   };
 }
 
+// The Check extension's own primary color; also the tenant_branding schema
+// default. A tenant that opted into the Check default look gets this color
+// regardless of its stored value or the instance default.
+export const CHECK_DEFAULT_PRIMARY_COLOR = "#F77F00";
+
 // Branding inherits per field: the empty string in a tenant row means "use
 // the instance default". Logo fields stay untouched; the asset route does
 // that fallback so per-tenant URLs stay stable while content inherits.
@@ -130,6 +135,12 @@ function resolveBranding(
     if (resolved[field] === "" && typeof defaultValue === "string") {
       resolved[field] = defaultValue;
     }
+  }
+  // Check-default look: the logo half is handled by the asset route and the
+  // logoUrl in buildArtifactBundle; the color half is pinned here so the
+  // stored tenant color survives for when the opt-out is lifted.
+  if (resolved.use_default_logo === 1) {
+    resolved.primary_color = CHECK_DEFAULT_PRIMARY_COLOR;
   }
   return resolved;
 }
@@ -796,7 +807,7 @@ export async function generateArtifacts(
       support_url: "",
       privacy_policy_url: "",
       about_url: "",
-      primary_color: "#F77F00",
+      primary_color: CHECK_DEFAULT_PRIMARY_COLOR,
       logo_r2_key: null,
       logo_content_type: null,
       use_default_logo: 0,

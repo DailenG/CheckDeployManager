@@ -317,7 +317,7 @@ describe("tenant defaults resolution", () => {
     );
   });
 
-  it("drops the logo URL when the tenant opts into Check's default logo", () => {
+  it("drops the logo URL and pins the color when the tenant opts into Check defaults", () => {
     const optedOut = buildArtifactBundle({
       ...HARBORVIEW_ARTIFACT_INPUT,
       branding: {
@@ -325,6 +325,12 @@ describe("tenant defaults resolution", () => {
         logo_r2_key: null,
         logo_content_type: null,
         use_default_logo: 1,
+      },
+      // Both an instance default logo and a default color exist; the
+      // opt-out must beat both, and the tenant's own #1B6FA8 too.
+      tenantDefaults: {
+        branding: { primary_color: "#00FF00" },
+        policy: {},
       },
       hasDefaultLogo: true,
     });
@@ -334,6 +340,7 @@ describe("tenant defaults resolution", () => {
       string
     >;
     expect(customBranding.logoUrl).toBe("");
+    expect(customBranding.primaryColor).toBe("#F77F00");
   });
 
   it("matches the golden bundle when every default is overridden by the tenant", () => {
