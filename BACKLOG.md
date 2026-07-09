@@ -114,6 +114,15 @@ Current work queue, in order. Update as items land.
       shared deltaEditorHtml/wireDeltaEditor helpers, plus a README
       feature-section rewrite for scanability.
 
+- [x] v0.6.3 release: explicit "Use Check's default logo" branding
+      option at both levels. A tenant can opt out of the instance
+      default logo (new use_default_logo column, migration 0002): the
+      asset route stops falling back and artifacts carry an empty
+      logoUrl, so the extension shows its built-in logo; uploading or
+      removing a logo clears the opt-out. The Settings page states the
+      no-default-logo state explicitly and relabels removal as using
+      Check's default logo. End-to-end and artifact-builder tests.
+
 Queue complete.
 
 The numbered sections below are scoped and ready to start, in priority
