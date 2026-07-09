@@ -240,6 +240,10 @@ into each tenant's delta.
   A tenant can suppress an indicator the baseline added; if both add the
   same indicator id, the duplicate-id validation gate blocks the publish.
 - The baseline is validated on save with the same checks as a tenant delta.
+- **Visibility**: each tenant's Rules tab shows the current baseline in a
+  collapsed read-only "inherited" panel above the draft editor (counts in
+  the summary line, full patterns inside), so an operator editing a tenant
+  sees what already applies beneath it without switching to Settings.
 - **Propagation**: published versions are immutable, so a baseline change
   reaches a tenant on its next publish. **Republish all tenants** (next to
   the editor) re-merges and republishes every tenant with a published

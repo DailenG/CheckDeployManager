@@ -235,6 +235,12 @@ pre.code {
 details.event { margin-bottom: 10px; }
 details.event summary { cursor: pointer; }
 
+/* Read-only inherited-baseline panel on the tenant Rules tab. */
+details.baseline-view { margin: 0 0 14px; }
+details.baseline-view summary { cursor: pointer; color: var(--muted); }
+details.baseline-view .baseline-label { margin: 8px 0 2px; font-size: 13px; }
+details.baseline-view pre.code { margin: 0; }
+
 .kv { display: grid; grid-template-columns: 220px 1fr; gap: 4px 14px; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; word-break: break-all; }

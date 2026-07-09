@@ -669,6 +669,29 @@ describe("baseline rule delta", () => {
     expect(body.errors.join(" ")).toContain("baseline_rule_delta");
   });
 
+  it("exposes the baseline on tenant detail so the Rules tab can show it", async () => {
+    const created = await createTenantViaApi();
+
+    // No baseline configured: the field is present but null.
+    let detail = await (await api(`/api/tenants/${created.id}`)).json<any>();
+    expect(detail.baseline).toBeNull();
+
+    await api(
+      "/api/instance/settings",
+      jsonInit("PUT", { settings: { baseline_rule_delta: BASELINE } }),
+    );
+    detail = await (await api(`/api/tenants/${created.id}`)).json<any>();
+    expect(detail.baseline).toEqual(JSON.parse(BASELINE));
+
+    // An empty-object baseline reads as no baseline.
+    await api(
+      "/api/instance/settings",
+      jsonInit("PUT", { settings: { baseline_rule_delta: "{}" } }),
+    );
+    detail = await (await api(`/api/tenants/${created.id}`)).json<any>();
+    expect(detail.baseline).toBeNull();
+  });
+
   it("applies beneath the tenant delta on publish and preview", async () => {
     await seedUpstream(fixtureBody);
     await api(

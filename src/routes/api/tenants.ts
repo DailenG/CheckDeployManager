@@ -130,7 +130,7 @@ tenantsRoutes.get("/:id", async (c) => {
   const tenant = await requireTenant(c);
   if (tenant === null) return c.json({ error: "tenant not found" }, 404);
 
-  const [guids, version, draft, lastFetch] = await Promise.all([
+  const [guids, version, draft, lastFetch, settings] = await Promise.all([
     c.env.DB.prepare(
       "SELECT guid, status, label, created_at, revoked_at FROM tenant_guids " +
         "WHERE tenant_id = ? ORDER BY created_at",
@@ -153,13 +153,37 @@ tenantsRoutes.get("/:id", async (c) => {
     )
       .bind(tenant.id)
       .first<{ last_fetch_at: string | null }>(),
+    getInstanceSettings(c.env.DB),
   ]);
+
+  // The instance baseline delta this tenant's own delta layers onto, so the
+  // Rules tab can show inherited rules read-only. Tolerant parse: a bad
+  // stored value degrades to "no baseline" here; strict validation lives in
+  // the instance settings PUT.
+  let baseline: Record<string, unknown> | null = null;
+  if ((settings.baseline_rule_delta ?? "") !== "") {
+    try {
+      const parsed: unknown = JSON.parse(settings.baseline_rule_delta);
+      if (
+        parsed !== null &&
+        typeof parsed === "object" &&
+        !Array.isArray(parsed) &&
+        Object.keys(parsed).length > 0
+      ) {
+        baseline = parsed as Record<string, unknown>;
+      }
+    } catch {
+      /* tolerate a malformed stored baseline */
+    }
+  }
+
   return c.json({
     tenant,
     guids: guids.results,
     current_version: version,
     draft,
     last_fetch_at: lastFetch?.last_fetch_at ?? null,
+    baseline,
   });
 });
 

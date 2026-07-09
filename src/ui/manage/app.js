@@ -727,12 +727,50 @@ async function renderRulesTab(container, tenantId, detail) {
   const storedText = detail.draft ? detail.draft.draft_json : "{}";
   const storedDelta = parseDeltaText(storedText);
 
+  /* Inherited baseline rules, read-only. A separate collapsed panel above
+     the editor rather than grayed lines inside its fields: mixing
+     uneditable rows into editable textareas invites edits that could never
+     save, and the provenance (Settings page) would be invisible. */
+  const baseline = detail.baseline;
+  let baselineHtml = "";
+  if (baseline) {
+    const baselineList = (key, label) => {
+      const items = Array.isArray(baseline[key]) ? baseline[key] : [];
+      if (items.length === 0) return "";
+      const lines = items
+        .map((item) => esc(typeof item === "string" ? item : JSON.stringify(item)))
+        .join("\n");
+      return `<p class="muted baseline-label">${esc(label)}</p>
+        <pre class="code muted">${lines}</pre>`;
+    };
+    const overrides =
+      baseline.raw_overrides &&
+      typeof baseline.raw_overrides === "object" &&
+      Object.keys(baseline.raw_overrides).length > 0
+        ? `<p class="muted baseline-label">Raw overrides</p>
+          <pre class="code muted">${esc(JSON.stringify(baseline.raw_overrides, null, 2))}</pre>`
+        : "";
+    baselineHtml = `<details class="baseline-view">
+      <summary><span class="badge">inherited</span> Baseline rules applied beneath
+        this draft: ${deltaCountsSummary(baseline)}</summary>
+      <p class="muted">Set on the <a href="#/settings">Settings page</a>, applied
+        to every tenant at publish, and not editable here. This tenant's own
+        suppressed indicator ids can remove a baseline-added indicator.</p>
+      ${baselineList("add_exclusion_domain_patterns", "Exclusion patterns")}
+      ${baselineList("add_trusted_login_patterns", "Trusted login patterns")}
+      ${baselineList("suppress_indicator_ids", "Suppressed indicator ids")}
+      ${baselineList("add_phishing_indicators", "Added indicators")}
+      ${overrides}
+    </details>`;
+  }
+
   container.innerHTML = `
     <div class="panel">
       <p class="muted">The delta layers onto the upstream rules at publish:
         patterns and indicators append, suppressed ids remove upstream
         indicators, raw overrides deep-merge last. The instance baseline
         delta (Settings page) applies beneath all of it.</p>
+      ${baselineHtml}
       ${deltaEditorHtml(storedText)}
       <div id="findings"></div>
       <div class="row" style="margin-top:10px">
