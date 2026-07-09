@@ -347,6 +347,29 @@ function buildGpoScript(payload: Record<string, unknown>): string {
     '    Write-Output "Updating existing GPO named $GroupPolicyName."',
     "}",
     "",
+    "# New-GPO can return before the new GPO's SYSVOL folder permissions have",
+    "# settled, so the first registry write sometimes fails with access denied",
+    "# (0x80070005) even for an account that plainly has rights. Retry briefly",
+    "# before treating the failure as real.",
+    "function Set-CheckGpoRegistryValue {",
+    "    param(",
+    "        [string]$Key,",
+    "        [string]$ValueName,",
+    "        [string]$Type,",
+    "        $Value",
+    "    )",
+    "    for ($attempt = 1; $attempt -le 5; $attempt++) {",
+    "        try {",
+    "            Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key $Key -ValueName $ValueName -Type $Type -Value $Value | Out-Null",
+    "            return",
+    "        } catch [System.UnauthorizedAccessException] {",
+    "            if ($attempt -eq 5) { throw }",
+    '            Write-Warning "Access denied writing $ValueName; SYSVOL permissions may still be propagating. Retrying in 3 seconds."',
+    "            Start-Sleep -Seconds 3",
+    "        }",
+    "    }",
+    "}",
+    "",
   ];
 
   let valueCount = 0;
@@ -361,7 +384,7 @@ function buildGpoScript(payload: Record<string, unknown>): string {
       const name = powershellSingleQuote(write.name);
       if (write.kind === "string") {
         lines.push(
-          `Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key ${key} -ValueName ${name} -Type String -Value ${powershellSingleQuote(String(write.value))} | Out-Null`,
+          `Set-CheckGpoRegistryValue -Key ${key} -ValueName ${name} -Type String -Value ${powershellSingleQuote(String(write.value))}`,
         );
       } else {
         const numeric =
@@ -371,7 +394,7 @@ function buildGpoScript(payload: Record<string, unknown>): string {
               : 0
             : Number(write.value);
         lines.push(
-          `Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key ${key} -ValueName ${name} -Type DWord -Value ${numeric} | Out-Null`,
+          `Set-CheckGpoRegistryValue -Key ${key} -ValueName ${name} -Type DWord -Value ${numeric}`,
         );
       }
       valueCount += 1;

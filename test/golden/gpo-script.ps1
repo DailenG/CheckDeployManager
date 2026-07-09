@@ -33,71 +33,94 @@ if ($null -eq $groupPolicyObject) {
     Write-Output "Updating existing GPO named $GroupPolicyName."
 }
 
+# New-GPO can return before the new GPO's SYSVOL folder permissions have
+# settled, so the first registry write sometimes fails with access denied
+# (0x80070005) even for an account that plainly has rights. Retry briefly
+# before treating the failure as real.
+function Set-CheckGpoRegistryValue {
+    param(
+        [string]$Key,
+        [string]$ValueName,
+        [string]$Type,
+        $Value
+    )
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        try {
+            Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key $Key -ValueName $ValueName -Type $Type -Value $Value | Out-Null
+            return
+        } catch [System.UnauthorizedAccessException] {
+            if ($attempt -eq 5) { throw }
+            Write-Warning "Access denied writing $ValueName; SYSVOL permissions may still be propagating. Retrying in 3 seconds."
+            Start-Sleep -Seconds 3
+        }
+    }
+}
+
 # Google Chrome
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\ExtensionSettings\benimdeioplgkhanklclahllklceahbe' -ValueName 'installation_mode' -Type String -Value 'force_installed' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\ExtensionSettings\benimdeioplgkhanklclahllklceahbe' -ValueName 'update_url' -Type String -Value 'https://clients2.google.com/service/update2/crx' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\ExtensionSettings\benimdeioplgkhanklclahllklceahbe' -ValueName 'toolbar_pin' -Type String -Value 'force_pinned' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'customRulesUrl' -Type String -Value 'https://check.example.com/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'updateInterval' -Type DWord -Value 24 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'enablePageBlocking' -Type DWord -Value 1 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'showNotifications' -Type DWord -Value 1 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'enableValidPageBadge' -Type DWord -Value 1 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'validPageBadgeTimeout' -Type DWord -Value 5 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'enableDebugLogging' -Type DWord -Value 0 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'enableCippReporting' -Type DWord -Value 1 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'cippServerUrl' -Type String -Value 'https://cipp.example.com' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'cippTenantId' -Type String -Value 'harborviewpt.onmicrosoft.com' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\urlAllowlist' -ValueName '1' -Type String -Value 'https://training.knowbe4.com/*' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\urlAllowlist' -ValueName '2' -Type String -Value 'https://*.harborviewpt.com/*' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\genericWebhook' -ValueName 'enabled' -Type DWord -Value 1 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\genericWebhook' -ValueName 'url' -Type String -Value 'https://check.example.com/hook/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\genericWebhook\events' -ValueName '1' -Type String -Value 'false_positive_report' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\genericWebhook\events' -ValueName '2' -Type String -Value 'page_blocked' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\genericWebhook\events' -ValueName '3' -Type String -Value 'threat_detected' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\domainSquatting' -ValueName 'enabled' -Type DWord -Value 1 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\domainSquatting' -ValueName 'deviationThreshold' -Type DWord -Value 2 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\domainSquatting' -ValueName 'Action' -Type String -Value 'block' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\customBranding' -ValueName 'companyName' -Type String -Value 'Example MSP' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\customBranding' -ValueName 'productName' -Type String -Value 'Example MSP Phishing Protection' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\customBranding' -ValueName 'supportEmail' -Type String -Value 'support@example.com' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\customBranding' -ValueName 'supportUrl' -Type String -Value 'https://support.example.com' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\customBranding' -ValueName 'privacyPolicyUrl' -Type String -Value 'https://example.com/privacy' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\customBranding' -ValueName 'aboutUrl' -Type String -Value '' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\customBranding' -ValueName 'primaryColor' -Type String -Value '#1B6FA8' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\customBranding' -ValueName 'logoUrl' -Type String -Value 'https://check.example.com/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo' | Out-Null
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\ExtensionSettings\benimdeioplgkhanklclahllklceahbe' -ValueName 'installation_mode' -Type String -Value 'force_installed'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\ExtensionSettings\benimdeioplgkhanklclahllklceahbe' -ValueName 'update_url' -Type String -Value 'https://clients2.google.com/service/update2/crx'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\ExtensionSettings\benimdeioplgkhanklclahllklceahbe' -ValueName 'toolbar_pin' -Type String -Value 'force_pinned'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'customRulesUrl' -Type String -Value 'https://check.example.com/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'updateInterval' -Type DWord -Value 24
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'enablePageBlocking' -Type DWord -Value 1
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'showNotifications' -Type DWord -Value 1
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'enableValidPageBadge' -Type DWord -Value 1
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'validPageBadgeTimeout' -Type DWord -Value 5
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'enableDebugLogging' -Type DWord -Value 0
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'enableCippReporting' -Type DWord -Value 1
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'cippServerUrl' -Type String -Value 'https://cipp.example.com'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy' -ValueName 'cippTenantId' -Type String -Value 'harborviewpt.onmicrosoft.com'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\urlAllowlist' -ValueName '1' -Type String -Value 'https://training.knowbe4.com/*'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\urlAllowlist' -ValueName '2' -Type String -Value 'https://*.harborviewpt.com/*'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\genericWebhook' -ValueName 'enabled' -Type DWord -Value 1
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\genericWebhook' -ValueName 'url' -Type String -Value 'https://check.example.com/hook/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\genericWebhook\events' -ValueName '1' -Type String -Value 'false_positive_report'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\genericWebhook\events' -ValueName '2' -Type String -Value 'page_blocked'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\genericWebhook\events' -ValueName '3' -Type String -Value 'threat_detected'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\domainSquatting' -ValueName 'enabled' -Type DWord -Value 1
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\domainSquatting' -ValueName 'deviationThreshold' -Type DWord -Value 2
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\domainSquatting' -ValueName 'Action' -Type String -Value 'block'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\customBranding' -ValueName 'companyName' -Type String -Value 'Example MSP'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\customBranding' -ValueName 'productName' -Type String -Value 'Example MSP Phishing Protection'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\customBranding' -ValueName 'supportEmail' -Type String -Value 'support@example.com'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\customBranding' -ValueName 'supportUrl' -Type String -Value 'https://support.example.com'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\customBranding' -ValueName 'privacyPolicyUrl' -Type String -Value 'https://example.com/privacy'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\customBranding' -ValueName 'aboutUrl' -Type String -Value ''
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\customBranding' -ValueName 'primaryColor' -Type String -Value '#1B6FA8'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\benimdeioplgkhanklclahllklceahbe\policy\customBranding' -ValueName 'logoUrl' -Type String -Value 'https://check.example.com/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo'
 
 # Microsoft Edge
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\ExtensionSettings\knepjpocdagponkonnbggpcnhnaikajg' -ValueName 'installation_mode' -Type String -Value 'force_installed' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\ExtensionSettings\knepjpocdagponkonnbggpcnhnaikajg' -ValueName 'update_url' -Type String -Value 'https://edge.microsoft.com/extensionwebstorebase/v1/crx' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\ExtensionSettings\knepjpocdagponkonnbggpcnhnaikajg' -ValueName 'toolbar_state' -Type String -Value 'force_shown' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'customRulesUrl' -Type String -Value 'https://check.example.com/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'updateInterval' -Type DWord -Value 24 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'enablePageBlocking' -Type DWord -Value 1 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'showNotifications' -Type DWord -Value 1 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'enableValidPageBadge' -Type DWord -Value 1 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'validPageBadgeTimeout' -Type DWord -Value 5 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'enableDebugLogging' -Type DWord -Value 0 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'enableCippReporting' -Type DWord -Value 1 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'cippServerUrl' -Type String -Value 'https://cipp.example.com' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'cippTenantId' -Type String -Value 'harborviewpt.onmicrosoft.com' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\urlAllowlist' -ValueName '1' -Type String -Value 'https://training.knowbe4.com/*' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\urlAllowlist' -ValueName '2' -Type String -Value 'https://*.harborviewpt.com/*' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\genericWebhook' -ValueName 'enabled' -Type DWord -Value 1 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\genericWebhook' -ValueName 'url' -Type String -Value 'https://check.example.com/hook/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\genericWebhook\events' -ValueName '1' -Type String -Value 'false_positive_report' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\genericWebhook\events' -ValueName '2' -Type String -Value 'page_blocked' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\genericWebhook\events' -ValueName '3' -Type String -Value 'threat_detected' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\domainSquatting' -ValueName 'enabled' -Type DWord -Value 1 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\domainSquatting' -ValueName 'deviationThreshold' -Type DWord -Value 2 | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\domainSquatting' -ValueName 'Action' -Type String -Value 'block' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\customBranding' -ValueName 'companyName' -Type String -Value 'Example MSP' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\customBranding' -ValueName 'productName' -Type String -Value 'Example MSP Phishing Protection' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\customBranding' -ValueName 'supportEmail' -Type String -Value 'support@example.com' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\customBranding' -ValueName 'supportUrl' -Type String -Value 'https://support.example.com' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\customBranding' -ValueName 'privacyPolicyUrl' -Type String -Value 'https://example.com/privacy' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\customBranding' -ValueName 'aboutUrl' -Type String -Value '' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\customBranding' -ValueName 'primaryColor' -Type String -Value '#1B6FA8' | Out-Null
-Set-GPRegistryValue -Guid $groupPolicyObject.Id @domainParameters -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\customBranding' -ValueName 'logoUrl' -Type String -Value 'https://check.example.com/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo' | Out-Null
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\ExtensionSettings\knepjpocdagponkonnbggpcnhnaikajg' -ValueName 'installation_mode' -Type String -Value 'force_installed'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\ExtensionSettings\knepjpocdagponkonnbggpcnhnaikajg' -ValueName 'update_url' -Type String -Value 'https://edge.microsoft.com/extensionwebstorebase/v1/crx'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\ExtensionSettings\knepjpocdagponkonnbggpcnhnaikajg' -ValueName 'toolbar_state' -Type String -Value 'force_shown'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'customRulesUrl' -Type String -Value 'https://check.example.com/rules/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34.json'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'updateInterval' -Type DWord -Value 24
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'enablePageBlocking' -Type DWord -Value 1
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'showNotifications' -Type DWord -Value 1
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'enableValidPageBadge' -Type DWord -Value 1
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'validPageBadgeTimeout' -Type DWord -Value 5
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'enableDebugLogging' -Type DWord -Value 0
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'enableCippReporting' -Type DWord -Value 1
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'cippServerUrl' -Type String -Value 'https://cipp.example.com'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy' -ValueName 'cippTenantId' -Type String -Value 'harborviewpt.onmicrosoft.com'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\urlAllowlist' -ValueName '1' -Type String -Value 'https://training.knowbe4.com/*'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\urlAllowlist' -ValueName '2' -Type String -Value 'https://*.harborviewpt.com/*'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\genericWebhook' -ValueName 'enabled' -Type DWord -Value 1
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\genericWebhook' -ValueName 'url' -Type String -Value 'https://check.example.com/hook/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\genericWebhook\events' -ValueName '1' -Type String -Value 'false_positive_report'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\genericWebhook\events' -ValueName '2' -Type String -Value 'page_blocked'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\genericWebhook\events' -ValueName '3' -Type String -Value 'threat_detected'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\domainSquatting' -ValueName 'enabled' -Type DWord -Value 1
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\domainSquatting' -ValueName 'deviationThreshold' -Type DWord -Value 2
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\domainSquatting' -ValueName 'Action' -Type String -Value 'block'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\customBranding' -ValueName 'companyName' -Type String -Value 'Example MSP'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\customBranding' -ValueName 'productName' -Type String -Value 'Example MSP Phishing Protection'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\customBranding' -ValueName 'supportEmail' -Type String -Value 'support@example.com'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\customBranding' -ValueName 'supportUrl' -Type String -Value 'https://support.example.com'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\customBranding' -ValueName 'privacyPolicyUrl' -Type String -Value 'https://example.com/privacy'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\customBranding' -ValueName 'aboutUrl' -Type String -Value ''
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\customBranding' -ValueName 'primaryColor' -Type String -Value '#1B6FA8'
+Set-CheckGpoRegistryValue -Key 'HKLM\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\knepjpocdagponkonnbggpcnhnaikajg\policy\customBranding' -ValueName 'logoUrl' -Type String -Value 'https://check.example.com/assets/f4a7c1d2-9b3e-4c8a-a1d6-2e5b7c9f0a34/logo'
 
 Write-Output 'Applied 62 registry values for Chrome and Edge.'
 Write-Output 'Link the GPO to an organizational unit when ready, for example:'
