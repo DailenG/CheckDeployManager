@@ -317,6 +317,25 @@ describe("tenant defaults resolution", () => {
     );
   });
 
+  it("drops the logo URL when the tenant opts into Check's default logo", () => {
+    const optedOut = buildArtifactBundle({
+      ...HARBORVIEW_ARTIFACT_INPUT,
+      branding: {
+        ...HARBORVIEW_ARTIFACT_INPUT.branding,
+        logo_r2_key: null,
+        logo_content_type: null,
+        use_default_logo: 1,
+      },
+      hasDefaultLogo: true,
+    });
+    expect(optedOut.logo_url).toBe("");
+    const customBranding = optedOut.chrome_managed_storage.customBranding as Record<
+      string,
+      string
+    >;
+    expect(customBranding.logoUrl).toBe("");
+  });
+
   it("matches the golden bundle when every default is overridden by the tenant", () => {
     // The Harborview sample sets all the fields these defaults cover, so
     // resolution must leave the golden output byte-identical.

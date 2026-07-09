@@ -118,12 +118,21 @@ rulesRoutes.get("/assets/:guid/logo", async (c) => {
   if (guidRow === null || guidRow.status !== "active") return bare404();
 
   const branding = await c.env.DB.prepare(
-    "SELECT logo_r2_key, logo_content_type FROM tenant_branding WHERE tenant_id = ?",
+    "SELECT logo_r2_key, logo_content_type, use_default_logo " +
+      "FROM tenant_branding WHERE tenant_id = ?",
   )
     .bind(guidRow.tenant_id)
-    .first<{ logo_r2_key: string | null; logo_content_type: string | null }>();
+    .first<{
+      logo_r2_key: string | null;
+      logo_content_type: string | null;
+      use_default_logo: number;
+    }>();
   let logoKey = branding?.logo_r2_key ?? null;
   let logoContentType = branding?.logo_content_type ?? null;
+
+  // Opted out of the instance default: serve nothing so the Check extension
+  // falls back to its built-in logo.
+  if (logoKey === null && branding?.use_default_logo === 1) return bare404();
 
   // Tenants without their own logo inherit the instance default: the
   // per-tenant URL stays stable while the content inherits. Read the two

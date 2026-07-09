@@ -188,7 +188,10 @@ republish.
   non-empty value overrides it. The default logo is served through each
   tenant's own `/assets/{guid}/logo` URL whenever the tenant has no logo of
   its own, so already-deployed policies pick up a new default logo without a
-  policy change.
+  policy change. A tenant can also opt out entirely with **Use Check's
+  default logo** on its Branding tab: no custom logo is served and the
+  extension shows Check's built-in logo instead. The same choice exists at
+  the instance level by simply not uploading a default logo.
 - **Policy**: a policy field the tenant never overrode inherits. The Policy
   tab marks inherited fields with an "inherited" badge; saving the tab keeps
   a field inherited while its value still matches the default, so tenants

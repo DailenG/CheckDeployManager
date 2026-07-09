@@ -668,8 +668,11 @@ export function buildArtifactBundle(input: ArtifactInput): ArtifactBundle {
   );
   const configUrl = `${baseUrl}/rules/${input.guid}.json`;
   const hookUrl = `${baseUrl}/hook/${input.guid}`;
+  // An empty logoUrl makes the Check extension show its built-in logo, so a
+  // tenant that opted out of the instance default gets no asset URL at all.
   const logoUrl =
-    input.branding.logo_r2_key !== null || input.hasDefaultLogo === true
+    input.branding.logo_r2_key !== null ||
+    (input.hasDefaultLogo === true && input.branding.use_default_logo !== 1)
       ? `${baseUrl}/assets/${input.guid}/logo`
       : "";
   const urls = { configUrl, hookUrl, logoUrl };
@@ -773,6 +776,7 @@ export async function generateArtifacts(
       primary_color: "#F77F00",
       logo_r2_key: null,
       logo_content_type: null,
+      use_default_logo: 0,
     } as TenantBrandingRow);
 
   const policyRow = await env.DB.prepare(

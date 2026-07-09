@@ -526,6 +526,71 @@ describe("tenant defaults", () => {
     expect(gone.status).toBe(404);
   });
 
+  it("lets a tenant opt out of the default logo for Check's built-in one", async () => {
+    await api(
+      "/api/instance/settings",
+      jsonInit("PUT", { settings: { public_base_url: BASE } }),
+    );
+    const form = new FormData();
+    form.set(
+      "logo",
+      new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "logo.png", {
+        type: "image/png",
+      }),
+    );
+    await api("/api/instance/default-logo", { method: "PUT", body: form });
+    const created = await createTenantViaApi();
+
+    // Opting out stops the asset URL and drops it from artifacts, so the
+    // extension falls back to its built-in logo.
+    const optOut = await api(
+      `/api/tenants/${created.id}/branding`,
+      jsonInit("PUT", { use_default_logo: true }),
+    );
+    expect(optOut.status).toBe(200);
+    expect((await optOut.json<any>()).branding.use_default_logo).toBe(1);
+    const asset = await SELF.fetch(`${BASE}/assets/${created.guid}/logo`);
+    expect(asset.status).toBe(404);
+    const { artifacts } = await (
+      await api(`/api/tenants/${created.id}/artifacts`)
+    ).json<any>();
+    expect(artifacts.logo_url).toBe("");
+    expect(artifacts.chrome_managed_storage.customBranding.logoUrl).toBe("");
+
+    // Uploading a custom logo clears the opt-out.
+    const tenantForm = new FormData();
+    tenantForm.set(
+      "logo",
+      new File([new Uint8Array([255, 216, 255])], "logo.jpg", { type: "image/jpeg" }),
+    );
+    const uploaded = await api(`/api/tenants/${created.id}/branding`, {
+      method: "PUT",
+      body: tenantForm,
+    });
+    expect((await uploaded.json<any>()).branding.use_default_logo).toBe(0);
+
+    // Removing the tenant logo returns to inheriting the instance default.
+    await api(
+      `/api/tenants/${created.id}/branding`,
+      jsonInit("PUT", { remove_logo: true }),
+    );
+    const inherited = await SELF.fetch(`${BASE}/assets/${created.guid}/logo`);
+    expect(inherited.status).toBe(200);
+    expect(inherited.headers.get("Content-Type")).toBe("image/png");
+
+    // An explicit use_default_logo: false also returns to inheriting.
+    await api(
+      `/api/tenants/${created.id}/branding`,
+      jsonInit("PUT", { use_default_logo: true }),
+    );
+    await api(
+      `/api/tenants/${created.id}/branding`,
+      jsonInit("PUT", { use_default_logo: false }),
+    );
+    const again = await SELF.fetch(`${BASE}/assets/${created.guid}/logo`);
+    expect(again.status).toBe(200);
+  });
+
   it("rejects oversized and wrong-type default logos", async () => {
     const bigForm = new FormData();
     bigForm.set(

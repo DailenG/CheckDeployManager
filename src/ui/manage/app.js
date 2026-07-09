@@ -917,6 +917,9 @@ async function renderBrandingTab(container, tenantId, detail) {
   let logoHtml;
   if (branding.logo_r2_key) {
     logoHtml = `<img class="logo-preview" alt="Tenant logo" src="/assets/${esc(activeGuid)}/logo?ts=${Date.now()}">`;
+  } else if (branding.use_default_logo) {
+    logoHtml = `<p class="muted"><span class="badge">Check default</span> This tenant uses Check's
+      built-in logo${data.default_logo ? "; the instance default logo (Settings page) is skipped" : ""}.</p>`;
   } else if (data.default_logo && activeGuid) {
     logoHtml = `<img class="logo-preview" alt="Inherited default logo" src="/assets/${esc(activeGuid)}/logo?ts=${Date.now()}">
       <p class="muted"><span class="badge">inherited</span> No tenant logo uploaded; the instance
@@ -946,6 +949,13 @@ async function renderBrandingTab(container, tenantId, detail) {
       <div class="row" style="margin-top:12px">
         <button id="save-branding" class="primary">Save branding</button>
         ${branding.logo_r2_key ? '<button id="remove-logo" class="danger">Remove logo</button>' : ""}
+        ${
+          branding.use_default_logo
+            ? '<button id="inherit-logo">Inherit the instance default logo</button>'
+            : branding.logo_r2_key || data.default_logo
+              ? '<button id="use-default-logo" title="No custom logo is served; the extension shows Check\'s own logo">Use Check\'s default logo</button>'
+              : ""
+        }
       </div>
     </div>`;
 
@@ -974,6 +984,36 @@ async function renderBrandingTab(container, tenantId, detail) {
       try {
         await api(`/tenants/${tenantId}/branding`, jsonBody("PUT", { remove_logo: true }));
         toast("Logo removed");
+        route();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  }
+  const useDefaultButton = container.querySelector("#use-default-logo");
+  if (useDefaultButton) {
+    useDefaultButton.addEventListener("click", async () => {
+      try {
+        await api(
+          `/tenants/${tenantId}/branding`,
+          jsonBody("PUT", { use_default_logo: true }),
+        );
+        toast("Using Check's default logo");
+        route();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  }
+  const inheritButton = container.querySelector("#inherit-logo");
+  if (inheritButton) {
+    inheritButton.addEventListener("click", async () => {
+      try {
+        await api(
+          `/tenants/${tenantId}/branding`,
+          jsonBody("PUT", { use_default_logo: false }),
+        );
+        toast("Inheriting the instance default logo");
         route();
       } catch (error) {
         toast(error.message, true);
@@ -1561,13 +1601,20 @@ async function renderSettings() {
       ${
         hasDefaultLogo
           ? `<img class="logo-preview" alt="Instance default logo" src="/api/instance/default-logo?ts=${Date.now()}">`
-          : '<p class="muted">No default logo. Tenants without their own logo serve none.</p>'
+          : `<p class="muted"><span class="badge">Check default</span> No custom default logo;
+            tenants without their own logo show Check's built-in logo.</p>`
       }
       <div class="grid2">
         <label class="field"><span>Default logo (png, jpg, or svg; 512 KB max)</span>
           <input type="file" id="td-logo" accept="image/png,image/jpeg,image/svg+xml"></label>
       </div>
-      ${hasDefaultLogo ? '<button id="td-remove-logo" class="danger small">Remove default logo</button>' : ""}
+      ${
+        hasDefaultLogo
+          ? `<button id="td-remove-logo" class="danger small"
+              title="Removes the uploaded default; tenants without their own logo show Check's built-in logo">Use
+              Check's default logo</button>`
+          : ""
+      }
       <h2>Policy defaults</h2>
       <p class="muted">Leave a field at (no default) or blank to keep Check's built-in behavior.</p>
       <div class="grid2">
@@ -1626,7 +1673,7 @@ async function renderSettings() {
     removeLogo.addEventListener("click", async () => {
       try {
         await api("/instance/default-logo", { method: "DELETE" });
-        toast("Default logo removed");
+        toast("Default logo removed; Check's built-in logo is used");
         route();
       } catch (error) {
         toast(error.message, true);
@@ -2199,7 +2246,9 @@ async function renderTenantOnboard(tenantId) {
     "support_url",
     "privacy_policy_url",
     "about_url",
-  ].some((key) => (b[key] || "") !== "") || b.logo_r2_key !== null;
+  ].some((key) => (b[key] || "") !== "") ||
+    b.logo_r2_key !== null ||
+    b.use_default_logo === 1;
   const brandingRows = [
     ["Company name", "company_name"],
     ["Product name", "product_name"],
@@ -2277,7 +2326,11 @@ async function renderTenantOnboard(tenantId) {
       <dl class="kv">${brandingRows}</dl>
       <p><a href="#/tenants/${esc(tenantId)}/branding">Open the Branding tab</a>
       to set client-specific values or upload a logo${
-        brandingData.default_logo ? " (the instance default logo serves until then)" : ""
+        brandingData.default_logo && b.use_default_logo !== 1
+          ? " (the instance default logo serves until then)"
+          : b.use_default_logo === 1
+            ? " (Check's built-in logo shows until then)"
+            : ""
       }.</p>`,
   );
 

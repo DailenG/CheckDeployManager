@@ -52,6 +52,9 @@ brandingRoutes.put("/:id/branding", async (c) => {
   let fields: Record<string, string> = {};
   let logo: File | null = null;
   let removeLogo = false;
+  // true pins the tenant to the Check extension's built-in logo (no custom
+  // logo, no instance-default inheritance); false returns to inheriting.
+  let useDefaultLogo: boolean | undefined;
 
   if (contentType.toLowerCase().startsWith("multipart/form-data")) {
     const form = await c.req.formData();
@@ -62,6 +65,9 @@ brandingRoutes.put("/:id/branding", async (c) => {
     const file = form.get("logo");
     if (file instanceof File) logo = file;
     if (form.get("remove_logo") === "true") removeLogo = true;
+    const flag = form.get("use_default_logo");
+    if (flag === "true") useDefaultLogo = true;
+    else if (flag === "false") useDefaultLogo = false;
   } else {
     let body: Record<string, unknown>;
     try {
@@ -73,6 +79,9 @@ brandingRoutes.put("/:id/branding", async (c) => {
       if (typeof body[key] === "string") fields[key] = body[key] as string;
     }
     if (body.remove_logo === true) removeLogo = true;
+    if (typeof body.use_default_logo === "boolean") {
+      useDefaultLogo = body.use_default_logo;
+    }
   }
 
   let logoR2Key: string | null | undefined;
@@ -90,7 +99,7 @@ brandingRoutes.put("/:id/branding", async (c) => {
     await c.env.STORAGE.put(logoR2Key, await logo.arrayBuffer(), {
       httpMetadata: { contentType: logo.type },
     });
-  } else if (removeLogo) {
+  } else if (removeLogo || useDefaultLogo === true) {
     const existing = await c.env.DB.prepare(
       "SELECT logo_r2_key FROM tenant_branding WHERE tenant_id = ?",
     )
@@ -99,6 +108,14 @@ brandingRoutes.put("/:id/branding", async (c) => {
     if (existing?.logo_r2_key) await c.env.STORAGE.delete(existing.logo_r2_key);
     logoR2Key = null;
     logoContentType = null;
+  }
+
+  // Uploading a custom logo or plain removal (back to inheriting) both clear
+  // the opt-out; an explicit use_default_logo value states it outright.
+  let useDefaultFlag: number | undefined;
+  if (useDefaultLogo !== undefined) useDefaultFlag = useDefaultLogo ? 1 : 0;
+  if (logo !== null || (removeLogo && useDefaultLogo === undefined)) {
+    useDefaultFlag = 0;
   }
 
   const assignments: string[] = [];
@@ -110,6 +127,10 @@ brandingRoutes.put("/:id/branding", async (c) => {
   if (logoR2Key !== undefined) {
     assignments.push("logo_r2_key = ?", "logo_content_type = ?");
     bindings.push(logoR2Key, logoContentType);
+  }
+  if (useDefaultFlag !== undefined) {
+    assignments.push("use_default_logo = ?");
+    bindings.push(useDefaultFlag);
   }
   if (assignments.length > 0) {
     bindings.push(tenant.id);
@@ -123,6 +144,7 @@ brandingRoutes.put("/:id/branding", async (c) => {
     fields: Object.keys(fields),
     logoUpdated: logo !== null,
     logoRemoved: removeLogo,
+    ...(useDefaultLogo !== undefined ? { useDefaultLogo } : {}),
   });
   const branding = await c.env.DB.prepare(
     "SELECT * FROM tenant_branding WHERE tenant_id = ?",

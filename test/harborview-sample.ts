@@ -20,6 +20,7 @@ export const HARBORVIEW_ARTIFACT_INPUT: ArtifactInput = {
     primary_color: "#1B6FA8",
     logo_r2_key: "assets/harborview-sample/logo.png",
     logo_content_type: "image/png",
+    use_default_logo: 0,
   },
   policySettings: {
     enableCippReporting: true,

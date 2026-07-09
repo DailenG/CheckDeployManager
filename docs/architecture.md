@@ -124,7 +124,8 @@ CREATE TABLE tenant_branding (
     about_url TEXT DEFAULT '',
     primary_color TEXT DEFAULT '#F77F00',
     logo_r2_key TEXT,                   -- assets/{tenant_id}/logo.{ext}
-    logo_content_type TEXT
+    logo_content_type TEXT,
+    use_default_logo INTEGER DEFAULT 0  -- 1 = show Check's built-in logo, skip the instance default
 );
 
 CREATE TABLE tenant_policy_settings (
@@ -254,7 +255,7 @@ A failed gate blocks publish (operator sees the errors) or, on cron, keeps the l
 |---|---|---|
 | `/rules/{guid}.json` | GET, HEAD | Resolve GUID (active) -> stream published artifact from R2 |
 | `/preview/{token}.json` | GET | Serve the tenant draft merged live against the active upstream snapshot; `Cache-Control: no-store` |
-| `/assets/{guid}/logo` | GET | Tenant logo from R2, falling back to the instance default logo when the tenant has none; `Cache-Control: public, max-age=86400`; correct image content type |
+| `/assets/{guid}/logo` | GET | Tenant logo from R2, falling back to the instance default logo when the tenant has none (404 when the tenant opted into Check's built-in logo via `use_default_logo`); `Cache-Control: public, max-age=86400`; correct image content type |
 | `/hook/{guid}` | POST | Webhook receiver; requires `Content-Type: application/json`, body under 256 KB; stores event; returns 200 `{"received":true}` |
 
 Rules response contract:
@@ -287,7 +288,7 @@ Static dashboard at `/manage` (dark mode default). JSON API under `/api`:
 | `/api/tenants/{id}/publish` | POST | Gate, merge, write R2 version, move pointer, audit |
 | `/api/tenants/{id}/rollback/{versionId}` | POST | Point tenant at a prior immutable version, audit |
 | `/api/tenants/{id}/versions` | GET | Version history with diff summaries |
-| `/api/tenants/{id}/branding` | GET, PUT | Branding fields; logo upload via multipart (validated: png/jpg/svg, 512 KB cap, https serving) |
+| `/api/tenants/{id}/branding` | GET, PUT | Branding fields; logo upload via multipart (validated: png/jpg/svg, 512 KB cap, https serving); `use_default_logo` opts the tenant out of the instance default in favor of Check's built-in logo |
 | `/api/tenants/{id}/policy` | GET, PUT | Managed-schema toggles (2.1 settings_json) |
 | `/api/tenants/{id}/artifacts` | GET | Generated policy outputs (section 5), rendered fresh |
 | `/api/tenants/{id}/guids` | GET, POST | List / rotate (mint new active GUID) |
