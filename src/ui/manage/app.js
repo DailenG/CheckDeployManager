@@ -2290,8 +2290,10 @@ async function renderTenantOnboard(tenantId) {
   const importPanel = `<div class="panel">
     <details>
       <summary>Migrating from the official Check GPO? Import its config</summary>
-      <p class="muted">Run <span class="mono">scripts/Export-CheckGpoConfig.ps1</span>
-        (in the repo) on a domain controller; it asks for your existing GPO's
+      <p class="muted">Run
+        <a href="/manage/export-checkgpoconfig.ps1" download="Export-CheckGpoConfig.ps1">Export-CheckGpoConfig.ps1</a>
+        (download; read-only, never modifies the GPO) on a domain controller;
+        it asks for your existing GPO's
         name and prints JSON. Paste that here, or paste any
         <span class="mono">check-managed-storage.json</span>. Branding and
         policy values are adopted into steps 2 and 3 (re-adopting overwrites

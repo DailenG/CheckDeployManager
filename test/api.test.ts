@@ -54,6 +54,24 @@ describe("auth boundary", () => {
   });
 });
 
+describe("GPO export script download", () => {
+  it("serves the bundled script to operators and fails closed otherwise", async () => {
+    const response = await api("/manage/export-checkgpoconfig.ps1");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("text/plain");
+    expect(response.headers.get("Content-Disposition")).toContain(
+      "Export-CheckGpoConfig.ps1",
+    );
+    const body = await response.text();
+    expect(body).toContain("Export-CheckGpoConfig.ps1");
+    expect(body).toContain("Import-Module GroupPolicy");
+
+    // Same operator gate as the rest of /manage.
+    const anonymous = await SELF.fetch(`${BASE}/manage/export-checkgpoconfig.ps1`);
+    expect(anonymous.status).toBe(403);
+  });
+});
+
 describe("tenants CRUD", () => {
   it("creates a tenant with GUID, preview token, defaults, and audit row", async () => {
     const created = await createTenantViaApi();
