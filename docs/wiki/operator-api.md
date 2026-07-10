@@ -1,453 +1,468 @@
 <!-- GENERATED FILE, do not edit by hand.
-     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit dc26798.
+     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit 5adb17f.
      Regenerate: node .gitnexus/run.cjs wiki, then: npm run docs:wiki -->
 
-# Operator API Module
+# Operator API
 
-The Operator API is the authenticated administrative API for managing tenants, rule drafts, publishing, branding, policy settings, GUID rotation, upstream sync state, webhook events, audit logs, and instance settings.
+The Operator API is the authenticated administrative API for managing tenants, rule drafts and publishing, branding, policy settings, GUID lifecycle, upstream syncs, webhook events, audit history, and instance-wide settings.
 
-All routes are composed in `src/routes/api/index.ts` through `apiRoutes`, a `Hono<AppEnv>` router. The module applies `requireOperator` to every route with:
+All routes are composed in `src/routes/api/index.ts` under a shared `Hono<AppEnv>` instance:
 
 ```ts
+export const apiRoutes = new Hono<AppEnv>();
+
 apiRoutes.use("*", requireOperator);
 ```
 
-Downstream handlers rely on `requireOperator` to populate operator context, especially `c.get("operatorEmail")` for audit records.
+`requireOperator` runs before every Operator API route. Route handlers then rely on `c.get("operatorEmail")` for audit attribution and on `c.env.DB` / `c.env.STORAGE` for D1 and R2-backed state.
 
 ```mermaid
 flowchart TD
-  A[apiRoutes] --> B[requireOperator]
-  B --> C[/tenants scoped APIs]
-  B --> D[/guids revoke API]
-  B --> E[/instance settings]
-  B --> F[/upstream sync]
-  B --> G[/events and audit]
-  C --> H[DB + STORAGE]
-  D --> H
-  E --> H
-  F --> H
-  G --> H
+  apiRoutes["apiRoutes"]
+  auth["requireOperator"]
+  tenants["/tenants"]
+  guids["/guids"]
+  instance["/instance"]
+  upstream["/upstream"]
+  events["/events"]
+  audit["/audit"]
+
+  apiRoutes --> auth
+  auth --> tenants
+  auth --> guids
+  auth --> instance
+  auth --> upstream
+  auth --> events
+  auth --> audit
 ```
 
 ## Route Composition
 
-`apiRoutes` mounts several feature routers:
+`index.ts` mounts feature routers by path prefix:
 
-```ts
-apiRoutes.route("/tenants", tenantsRoutes);
-apiRoutes.route("/tenants", rulesApiRoutes);
-apiRoutes.route("/tenants", brandingRoutes);
-apiRoutes.route("/tenants", policyRoutes);
-apiRoutes.route("/tenants", guidsRoutes);
-apiRoutes.route("/tenants", artifactsRoutes);
-apiRoutes.route("/guids", guidRevokeRoutes);
-apiRoutes.route("/instance", instanceRoutes);
-apiRoutes.route("/upstream", upstreamRoutes);
-apiRoutes.route("/events", eventsRoutes);
-apiRoutes.route("/audit", auditRoutes);
-```
+| Prefix | Router | Responsibility |
+| --- | --- | --- |
+| `/tenants` | `tenantsRoutes` | Tenant CRUD, duplication, dashboard tenant summary |
+| `/tenants` | `rulesApiRoutes` | Tenant rule drafts, publish, rollback, versions |
+| `/tenants` | `brandingRoutes` | Tenant branding and logo uploads |
+| `/tenants` | `policyRoutes` | Tenant policy settings and inherited defaults |
+| `/tenants` | `guidsRoutes` | Tenant GUID listing and rotation |
+| `/tenants` | `artifactsRoutes` | Fresh artifact rendering |
+| `/guids` | `guidRevokeRoutes` | GUID revocation by GUID value |
+| `/instance` | `instanceRoutes` | Instance status, settings, default logo, fleet republish |
+| `/upstream` | `upstreamRoutes` | Upstream snapshot status and manual sync |
+| `/events` | `eventsRoutes` | Webhook inbox and disposition updates |
+| `/audit` | `auditRoutes` | Audit log query API |
 
-Most tenant-specific routes are mounted under `/tenants/:id/...`. GUID revocation is mounted separately under `/guids/:guid/revoke` because it addresses a GUID directly rather than a tenant resource.
+The module is intentionally thin: route handlers validate request shape, enforce tenant existence, perform small composition queries, and delegate rule publishing, artifact generation, upstream sync, settings helpers, and audit writes to `src/lib/*`.
 
-## Shared Utilities
+## Shared Helpers
 
 ### `readJsonBody(c)`
 
-`readJsonBody` centralizes tolerant JSON-object parsing. It returns:
+Defined in `src/routes/api/util.ts`.
 
-- `Record<string, unknown>` when the request body parses as a non-array object
-- `null` when parsing fails, the body is `null`, the body is not an object, or the body is an array
+```ts
+export async function readJsonBody(
+  c: Context<AppEnv>,
+): Promise<Record<string, unknown> | null>
+```
 
-Routes use this helper when they want a consistent “invalid JSON object” path without throwing.
+`readJsonBody` safely parses a JSON request body and only accepts plain object payloads. It returns `null` when parsing fails, when the body is `null`, when the parsed value is not an object, or when it is an array.
 
-Used by:
+Most JSON-mutating routes use this helper before validating required properties:
 
-- `tenantsRoutes`
-- `rulesApiRoutes`
-- `policyRoutes`
-- `guidsRoutes`
-- `instanceRoutes`
-- `eventsRoutes`
+- `tenantsRoutes.post("/")`
+- `tenantsRoutes.patch("/:id")`
+- `guidsRoutes.post("/:id/guids")`
+- `eventsRoutes.patch("/")`
+- `policyRoutes.put("/:id/policy")`
+- `rulesApiRoutes.put("/:id/rules")`
+- `instanceRoutes.put("/settings")`
 
 ### `requireTenant(c)`
 
-`requireTenant` reads the route parameter named `id` and resolves it through `getTenant(c.env.DB, id)`. It returns a `TenantRow` or `null`.
-
-Tenant-scoped handlers consistently use this pattern:
+Defined in `src/routes/api/util.ts`.
 
 ```ts
-const tenant = await requireTenant(c);
-if (tenant === null) return c.json({ error: "tenant not found" }, 404);
+export async function requireTenant(c: Context<AppEnv>): Promise<TenantRow | null>
 ```
 
-Used by tenant detail, rules, branding, policy, GUID, and artifact routes.
+`requireTenant` reads the `:id` route parameter and calls `getTenant(c.env.DB, id)`. Tenant-scoped routes use it as the first operation and return:
 
-## Tenants API
+```ts
+return c.json({ error: "tenant not found" }, 404);
+```
+
+when it returns `null`.
+
+## Tenant Management
 
 Implemented in `src/routes/api/tenants.ts`.
 
 ### `GET /tenants`
 
-Lists tenants with operational dashboard indicators.
-
-The query joins `tenants` to the current `ruleset_versions` row and computes:
+Lists tenants with dashboard health indicators. It loads `stale_fetch_hours` from `getInstanceSettings`, then returns each tenant with:
 
 - current published version number
-- publish time
-- latest fetch time from `fetch_metrics`
+- last fetch timestamp
 - active GUID count
-- revoked GUID hit count
-- new webhook event count
-- `stale` status based on `stale_fetch_hours` from `getInstanceSettings`
+- revoked GUID hits
+- count of new webhook events
+- computed `stale` flag
 
-The response shape is:
-
-```ts
-{
-  tenants,
-  stale_fetch_hours
-}
-```
+The `stale` flag is calculated in the route handler from `last_fetch_at` and the configured stale threshold.
 
 ### `POST /tenants`
 
-Creates a tenant and initializes all required tenant-owned rows in one `DB.batch()` call.
+Creates a tenant and its required companion rows in one `DB.batch`:
 
-It creates:
+- `tenants`
+- first active `tenant_guids` row
+- default `tenant_rule_deltas` row with `{}` draft
+- default `tenant_branding` row
+- default `tenant_policy_settings` row
 
-- a tenant row
-- the first active GUID
-- an empty rule draft in `tenant_rule_deltas`
-- a default branding row
-- a default policy settings row
-- a preview token via `newToken()`
+It uses:
 
-Required body:
+- `newId()` for the tenant ID and first GUID
+- `newToken()` for the preview token
+- `nowIso()` for timestamps
+- `writeAudit(..., "tenant.create", ...)`
 
-```json
-{
-  "name": "Tenant Name"
-}
-```
+The request body must contain a non-empty string `name`. `notes` is optional.
 
-Optional:
+### `POST /tenants/:id/duplicate`
 
-```json
-{
-  "notes": "Internal notes"
-}
-```
+Creates a new tenant using another tenant as the rule-draft source. Only `tenant_rule_deltas.draft_json` is copied. Branding and policy are intentionally initialized as defaults so the new tenant continues to inherit instance-level defaults.
 
-On success, the route audits `tenant.create` and returns `201` with:
-
-```ts
-{
-  id,
-  name,
-  guid,
-  preview_token
-}
-```
+Audit action: `tenant.duplicate`.
 
 ### `GET /tenants/:id`
 
-Returns a tenant detail bundle:
+Returns the full tenant detail view:
 
 - `tenant`
-- all tenant GUIDs
-- current version row, if `tenant.current_version_id` is set
-- current draft row
+- tenant GUIDs
+- current ruleset version, if any
+- draft rule delta
+- latest fetch timestamp
+- parsed `baseline` from `settings.baseline_rule_delta`
 
-The GUIDs, current version, and draft are loaded concurrently with `Promise.all`.
+The baseline parse is tolerant. Invalid stored JSON degrades to `null`; strict validation happens when instance settings are written.
 
 ### `PATCH /tenants/:id`
 
 Updates tenant `name` and `notes`.
 
-Behavior:
+`name` defaults to the current name if omitted or blank. `notes` keeps the current value when omitted, stores a string when provided as a string, and stores `null` otherwise.
 
-- Missing `name` keeps the existing name.
-- Blank or non-string `name` keeps the existing name.
-- Missing `notes` keeps existing notes.
-- String `notes` updates notes.
-- Non-string `notes` clears notes to `null`.
-
-The route updates `updated_at` with `nowIso()` and audits `tenant.update`.
+Audit action: `tenant.update`.
 
 ### `DELETE /tenants/:id`
 
-Decommissions a tenant.
-
-Deletion is guarded: all tenant GUIDs must already be revoked. If any active GUID remains, the route returns `409`:
+Deletes a tenant only after all tenant GUIDs are revoked. If any active GUID remains, the route returns `409`:
 
 ```json
-{
-  "error": "tenant still has active GUIDs; revoke them before deleting"
-}
+{ "error": "tenant still has active GUIDs; revoke them before deleting" }
 ```
 
-Before deleting rows, it removes tenant-owned R2 objects:
+Before deleting rows, it removes R2 artifacts for:
 
-- ruleset version objects from `ruleset_versions.r2_key`
-- branding logo from `tenant_branding.logo_r2_key`
+- published ruleset versions
+- tenant custom logo
 
-Then it batches deletion of webhook events, metrics, revoked GUID hits, versions, draft, branding, policy settings, GUIDs, and the tenant row. The route audits `tenant.delete`.
+Then it clears `current_version_id` and deletes dependent rows from webhook events, metrics, revoked GUID hits, ruleset versions, rule deltas, branding, policy settings, GUIDs, and finally `tenants`.
 
-## Tenant Rules API
+Audit action: `tenant.delete`.
+
+## Rules API
 
 Implemented in `src/routes/api/rules.ts`.
 
+The rules routes manage tenant draft deltas, publishing, rollback, and version history.
+
 ### `GET /tenants/:id/rules`
 
-Returns the draft rule delta row:
+Returns the tenant draft row from `tenant_rule_deltas`:
 
-```ts
-{
-  draft
-}
+```json
+{ "draft": { ... } }
 ```
-
-The draft row includes `draft_json`, `updated_at`, and `updated_by`.
 
 ### `PUT /tenants/:id/rules`
 
-Saves a draft delta and performs validation.
+Saves `body.delta` as the tenant draft.
 
-Required body:
+Validation is intentionally split:
+
+1. `validateDelta(deltaJson)` checks the delta schema.
+2. If the delta is structurally valid, `buildMergedRuleset(c.env, deltaJson, nextVersion)` performs a dry run against the active upstream snapshot.
+
+Invalid drafts still save. The response reports whether the saved draft is publishable:
 
 ```json
 {
-  "delta": {}
+  "saved": true,
+  "valid": false,
+  "findings": ["..."]
 }
 ```
 
-The route serializes `body.delta` to JSON, validates it with `validateDelta`, and, if structurally valid, performs a dry-run merge with `buildMergedRuleset`.
+This allows the dashboard to persist work-in-progress while keeping publish gated.
 
-Important behavior: invalid drafts still save. The route records findings and returns whether the saved draft is publishable:
-
-```ts
-{
-  saved: true,
-  valid: findings.length === 0,
-  findings
-}
-```
-
-This allows operators to persist in-progress work while keeping publish gated elsewhere.
-
-The route audits `rules.draft_save` with:
-
-- whether the draft was valid
-- up to the first 10 findings
+Audit action: `rules.draft_save`, with the first 10 findings stored.
 
 ### `POST /tenants/:id/publish`
 
-Publishes the current draft for a tenant.
-
-The route loads the draft with `getDraftDelta` and delegates publishing to:
+Loads the current draft with `getDraftDelta` and delegates publishing to:
 
 ```ts
 publishTenant(c.env, tenant.id, draft, c.get("operatorEmail"))
 ```
 
-If publishing fails, it returns `422` with `errors`. On success, it returns the `publishTenant` result directly.
+If publishing fails, the route returns `422` with `errors`. Successful responses are returned directly from `publishTenant`.
 
 ### `POST /tenants/:id/rollback/:versionId`
 
-Moves the tenant’s `current_version_id` back to an existing version owned by the same tenant.
+Rolls the tenant back by setting `tenants.current_version_id` to an existing `ruleset_versions.id` for that tenant.
 
-The route verifies the version exists with:
+The route does not create a new version. It switches the current pointer to the selected version and returns the selected version ID, version number, and ETag.
 
-```sql
-SELECT * FROM ruleset_versions WHERE id = ? AND tenant_id = ?
-```
-
-If no matching version exists, it returns `404`.
-
-On success, it updates `tenants.current_version_id`, audits `rules.rollback`, and returns the selected version ID, version number, and ETag.
+Audit action: `rules.rollback`.
 
 ### `GET /tenants/:id/versions`
 
-Lists tenant ruleset versions newest-first and includes upstream snapshot metadata when available.
+Lists all published ruleset versions for a tenant in descending `version_number` order, including joined upstream snapshot metadata:
 
-Response includes:
+- `upstream_version`
+- `upstream_diff`
 
-```ts
-{
-  versions,
-  current_version_id: tenant.current_version_id
-}
-```
+The response also includes `current_version_id`.
 
-## Branding API
+## Tenant Branding
 
 Implemented in `src/routes/api/branding.ts`.
 
+Branding supports text fields, tenant custom logos, inherited instance defaults, and an explicit “use built-in default logo” opt-out.
+
+### Constants
+
+```ts
+export const MAX_LOGO_BYTES = 512 * 1024;
+
+export const LOGO_TYPES = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/svg+xml": "svg",
+};
+```
+
+The same logo constraints are reused by instance default-logo routes.
+
 ### `GET /tenants/:id/branding`
 
-Returns the `tenant_branding` row for the tenant.
+Returns:
+
+- current row from `tenant_branding`
+- parsed instance-level branding defaults from `tenant_defaults`
+- `default_logo`, a boolean indicating whether an instance default logo is configured
+
+Defaults are parsed with `parseTenantDefaults(settings.tenant_defaults ?? "").branding`.
 
 ### `PUT /tenants/:id/branding`
 
-Updates branding fields and optionally uploads or removes a logo.
+Accepts either JSON or `multipart/form-data`.
 
-Supported text fields are defined by `TEXT_FIELDS`:
+Supported text fields are:
+
+- `company_name`
+- `product_name`
+- `support_email`
+- `support_url`
+- `privacy_policy_url`
+- `about_url`
+- `primary_color`
+
+Multipart requests may include:
+
+- `logo`
+- `remove_logo=true`
+- `use_default_logo=true|false`
+
+JSON requests may include:
+
+- text fields as strings
+- `remove_logo: true`
+- `use_default_logo: boolean`
+
+Logo uploads are stored in R2 at:
 
 ```ts
-[
-  "company_name",
-  "product_name",
-  "support_email",
-  "support_url",
-  "privacy_policy_url",
-  "about_url",
-  "primary_color",
-]
+assets/${tenant.id}/logo.${extension}
 ```
 
-The route accepts either JSON or `multipart/form-data`.
+When a logo is removed or `use_default_logo` is set to `true`, the existing tenant logo object is deleted from R2 and `logo_r2_key` / `logo_content_type` are set to `null`.
 
-For JSON, string values are copied from the body. `remove_logo: true` deletes the existing logo.
+`use_default_logo` has specific inheritance semantics:
 
-For multipart requests, the same text fields are read from form fields. A `logo` file can be uploaded, and `remove_logo=true` removes the existing logo.
+- custom logo upload clears the opt-out
+- plain `remove_logo` returns to instance-default inheritance
+- `use_default_logo: true` pins the tenant to the extension’s built-in logo
+- `use_default_logo: false` returns to inherited/default behavior
 
-Logo constraints are:
+Audit action: `branding.update`.
 
-- MIME type must be `image/png`, `image/jpeg`, or `image/svg+xml`
-- max size is `MAX_LOGO_BYTES`, currently `512 * 1024`
-- stored at `assets/${tenant.id}/logo.${extension}` in `c.env.STORAGE`
-
-The route updates only fields that were provided. It audits `branding.update` with changed text fields and logo update/removal flags.
-
-## Policy API
+## Tenant Policy
 
 Implemented in `src/routes/api/policy.ts`.
 
-Policy settings are managed-schema tenant settings stored as JSON in `tenant_policy_settings.settings_json`.
+Tenant policy is stored as JSON in `tenant_policy_settings.settings_json`. The module validates known managed-schema fields before writing.
 
 ### `validatePolicySettings(settings)`
 
-Validates setting keys and value types against `POLICY_FIELDS`.
-
-Known fields include:
-
-- boolean toggles such as `enablePageBlocking`, `showNotifications`, `enableValidPageBadge`, `enableDebugLogging`, `enableCippReporting`
-- numeric settings such as `validPageBadgeTimeout` and `updateInterval`
-- string settings such as `cippServerUrl` and `cippTenantId`
-- string arrays such as `urlAllowlist`
-- object settings such as `domainSquatting` and `genericWebhook`
-
-Unknown keys produce:
-
 ```ts
-unknown policy setting: ${key}
+export function validatePolicySettings(settings: Record<string, unknown>): string[]
 ```
 
-Type mismatches produce:
+Allowed policy keys and their expected types are defined by `POLICY_FIELDS`:
+
+| Setting | Type check |
+| --- | --- |
+| `enablePageBlocking` | boolean |
+| `showNotifications` | boolean |
+| `enableValidPageBadge` | boolean |
+| `validPageBadgeTimeout` | finite number |
+| `enableDebugLogging` | boolean |
+| `updateInterval` | finite number |
+| `urlAllowlist` | string array |
+| `domainSquatting` | non-array object |
+| `genericWebhook` | non-array object |
+| `enableCippReporting` | boolean |
+| `cippServerUrl` | string |
+| `cippTenantId` | string |
+
+Unknown keys and wrong types produce validation errors.
+
+### `validateTenantDefaults(raw)`
 
 ```ts
-policy setting ${key} has the wrong type
+export function validateTenantDefaults(raw: string): string[]
 ```
+
+This validates the instance-level `tenant_defaults` setting. It is exported from `policy.ts` and used by `instanceRoutes.put("/settings")`.
+
+The accepted top-level sections are:
+
+- `branding`
+- `policy`
+
+Branding defaults must use fields from `INHERITABLE_BRANDING_FIELDS` and string values.
+
+Policy defaults must use fields from `INHERITABLE_POLICY_FIELDS`, must also exist in `POLICY_FIELDS`, and must pass the same type checks as tenant policy settings. Some valid per-tenant policy settings can still be rejected as defaults if they are not inheritable.
 
 ### `GET /tenants/:id/policy`
 
-Returns parsed policy settings:
+Returns the tenant’s policy settings plus parsed inherited defaults:
 
-```ts
+```json
 {
-  settings: JSON.parse(row?.settings_json ?? "{}")
+  "settings": {},
+  "defaults": {}
 }
 ```
 
 ### `PUT /tenants/:id/policy`
 
-Requires:
+Requires a JSON body with a `settings` object. The object is validated with `validatePolicySettings`, then upserted into `tenant_policy_settings`.
 
-```json
-{
-  "settings": {}
-}
-```
+Audit action: `policy.update`.
 
-The route validates the settings object, returns `422` on validation errors, and upserts `tenant_policy_settings`. It audits `policy.update` with the changed keys.
-
-## Tenant GUID API
+## GUID Management
 
 Implemented in `src/routes/api/guids.ts`.
 
+GUIDs are tenant-bound fetch identifiers. Rotation and revocation are separate operations so clients can migrate gradually.
+
 ### `GET /tenants/:id/guids`
 
-Lists GUIDs for a tenant with usage metrics:
+Lists tenant GUIDs with usage metrics:
 
-- GUID status and label
-- creation and revocation timestamps
-- total fetch hits from `fetch_metrics`
-- last fetch timestamp
-- revoked GUID hits from `revoked_guid_hits`
+- `fetch_hits`
+- `last_fetch_at`
+- `revoked_hits`
+
+The metrics are calculated with subqueries over `fetch_metrics` and `revoked_guid_hits`.
 
 ### `POST /tenants/:id/guids`
 
-Mints a new active GUID for the tenant.
+Mints a new active GUID with `newId()`. The old GUID remains active until explicitly revoked.
 
-Optional body:
+Optional body field:
 
 ```json
-{
-  "label": "Migration GUID"
-}
+{ "label": "..." }
 ```
 
-This is a rotation operation, but the previous GUIDs remain active until explicitly revoked. The route audits `guid.rotate` and returns `201`:
-
-```ts
-{
-  guid
-}
-```
+Audit action: `guid.rotate`.
 
 ### `POST /guids/:guid/revoke`
 
-Revokes a GUID by GUID value.
+Revokes a GUID by GUID value rather than tenant ID.
 
-The route:
+The route returns:
 
-1. Finds the GUID in `tenant_guids`.
-2. Returns `404` if not found.
-3. Returns `409` if already revoked.
-4. Sets `status = 'revoked'` and `revoked_at = nowIso()`.
-5. Audits `guid.revoke`.
+- `404` if the GUID does not exist
+- `409` if it is already revoked
+- `{ "ok": true }` after setting `status = 'revoked'` and `revoked_at = nowIso()`
 
-## Artifacts API
+Audit action: `guid.revoke`.
+
+## Artifacts
 
 Implemented in `src/routes/api/artifacts.ts`.
 
 ### `GET /tenants/:id/artifacts`
 
-Generates tenant artifacts on demand with:
+Generates tenant artifacts fresh on every request:
 
 ```ts
 generateArtifacts(c.env, tenant.id, c.req.query("guid") ?? undefined)
 ```
 
-Generated artifacts are not stored by this route. They are rendered fresh on each request.
+Nothing generated by this endpoint is stored by the route. If artifact generation fails, the route returns `409` with the generation error.
 
-If generation fails, the route returns `409` with the generation error. On success:
+Successful response:
 
-```ts
-{
-  artifacts: result.artifacts
-}
+```json
+{ "artifacts": [...] }
 ```
 
-The optional `guid` query parameter lets callers generate artifacts for a specific GUID context.
-
-## Instance Settings API
+## Instance API
 
 Implemented in `src/routes/api/instance.ts`.
 
+The instance routes manage first-run status, global settings, default logos, and fleet republishing.
+
+### `GET /instance/status`
+
+Returns aggregate setup status for the operator dashboard and onboarding wizard.
+
+The route composes:
+
+- operator email from `c.get("operatorEmail")`
+- environment from `c.env.ENVIRONMENT`
+- package version from `package.json`
+- instance settings from `getInstanceSettings`
+- active upstream snapshot from `getActiveSnapshot`
+- tenant count
+- whether any ruleset has been published
+
+There is one lazy write: if `onboarding_completed_at` is missing and the deployment already has signs of prior configuration, the route stamps `onboarding_completed_at` with `nowIso()`. This prevents existing deployments from being forced through first-run onboarding.
+
 ### `GET /instance/settings`
 
-Returns effective instance settings from `getInstanceSettings(c.env.DB)`.
+Returns all instance settings from `getInstanceSettings`.
 
 ### `PUT /instance/settings`
 
@@ -463,22 +478,68 @@ Requires:
 
 Validation rules:
 
-- every key must exist in `DEFAULT_INSTANCE_SETTINGS`
-- every value must be a string
-- integer-backed settings must be non-negative integer strings
+- keys must exist in `DEFAULT_INSTANCE_SETTINGS`
+- values must be strings
+- `metrics_retention_days`, `webhook_retention_days`, `stale_fetch_hours`, and `upstream_keep_snapshots` must be non-negative integer strings
+- `default_logo_r2_key` and `default_logo_content_type` cannot be written directly
+- `tenant_defaults` is validated with `validateTenantDefaults`
+- non-empty `baseline_rule_delta` is validated with `validateDelta`
 
-Integer-backed settings are:
+Logo settings are intentionally managed only through `/api/instance/default-logo` endpoints so the R2 object and setting keys stay synchronized.
+
+Audit action: `instance.settings_update`.
+
+### `GET /instance/default-logo`
+
+Serves the configured instance default logo from R2.
+
+If no logo is configured or the R2 object is missing, returns `404`.
+
+Successful responses include:
+
+- `Content-Type` from `default_logo_content_type`
+- `Cache-Control: no-store`
+- `X-Content-Type-Options: nosniff`
+
+### `PUT /instance/default-logo`
+
+Requires `multipart/form-data` with a `logo` file. The same logo validation as tenant branding applies:
+
+- PNG, JPG, or SVG only
+- maximum 512 KB
+
+The logo is stored at:
 
 ```ts
-[
-  "metrics_retention_days",
-  "webhook_retention_days",
-  "stale_fetch_hours",
-  "upstream_keep_snapshots",
-]
+assets/instance-default/logo.${extension}
 ```
 
-Each valid update is written through `putInstanceSetting`. The route audits `instance.settings_update` and returns the refreshed effective settings.
+The route updates:
+
+- `default_logo_r2_key`
+- `default_logo_content_type`
+
+If the previous default logo used a different key, it is deleted from R2.
+
+Audit action: `instance.default_logo_update`.
+
+### `DELETE /instance/default-logo`
+
+Deletes the current default logo object if configured, clears both default-logo settings, and audits the removal.
+
+Audit action: `instance.default_logo_remove`.
+
+### `POST /instance/republish`
+
+Republishes all tenants with published versions by delegating to:
+
+```ts
+republishAllTenants(c.env, operator, "baseline republish", operator)
+```
+
+This is how a changed `baseline_rule_delta` is pushed across the fleet without waiting for individual tenant publishes.
+
+Audit action: `rules.republish_all`.
 
 ## Upstream API
 
@@ -486,39 +547,29 @@ Implemented in `src/routes/api/upstream.ts`.
 
 ### `GET /upstream`
 
-Returns upstream synchronization state:
+Returns upstream sync state:
 
 - active snapshot from `getActiveSnapshot`
-- latest 25 snapshot rows from `upstream_snapshots`
-- most recent `upstream.sync` audit entry
-
-Response:
-
-```ts
-{
-  active,
-  snapshots,
-  last_sync
-}
-```
+- latest 25 rows from `upstream_snapshots`
+- most recent `audit_log` entry where `action = 'upstream.sync'`
 
 ### `POST /upstream`
 
-Forces an upstream sync with:
+Forces an upstream sync:
 
 ```ts
 syncUpstream(c.env, c.get("operatorEmail"))
 ```
 
-`syncUpstream` performs its own audit logging. If the outcome status is `fetch_error`, the route returns HTTP `502`; otherwise it returns `200`.
+`syncUpstream` handles its own audit write. The API returns status `502` only when `outcome.status === "fetch_error"`; otherwise it returns `200`.
 
 ## Events API
 
 Implemented in `src/routes/api/events.ts`.
 
-The events API manages webhook event inbox disposition. Payloads are treated as untrusted strings by this module.
+The events API is the operator-facing view of the webhook inbox. Payloads remain untrusted strings; rendering code is responsible for HTML escaping.
 
-Allowed dispositions are:
+Allowed event dispositions are:
 
 ```ts
 new
@@ -528,30 +579,30 @@ dismissed
 
 ### `GET /events`
 
-Lists webhook events, optionally filtered by:
+Optional filters:
 
 - `status`
 - `tenant_id`
 - `limit`
 
-`status` is only applied when it is one of the allowed dispositions. `limit` defaults to `100` and is capped at `500`.
+`status` is applied only when it is one of the allowed dispositions. `limit` defaults to `100` and is capped at `500`.
 
-The query joins `webhook_events` to `tenants` to include `tenant_name`.
+The query joins `webhook_events` to `tenants` so dashboard rows can include `tenant_name`.
 
 ### `PATCH /events`
 
-Updates an event disposition.
-
-Required body:
+Requires:
 
 ```json
 {
-  "id": "event-id",
-  "status": "reviewed"
+  "id": "...",
+  "status": "new|reviewed|dismissed"
 }
 ```
 
-The route validates the status, verifies the event exists, updates `webhook_events.status`, and audits `events.disposition`.
+The route verifies the event exists, updates `webhook_events.status`, and writes an audit entry tied to the event’s tenant.
+
+Audit action: `events.disposition`.
 
 ## Audit API
 
@@ -559,9 +610,7 @@ Implemented in `src/routes/api/audit.ts`.
 
 ### `GET /audit`
 
-Lists audit log entries ordered newest-first.
-
-Optional filters:
+Queries `audit_log` with optional filters:
 
 - `tenant_id`
 - `operator`
@@ -569,91 +618,87 @@ Optional filters:
 - `before`
 - `limit`
 
-`before` filters by timestamp:
+`before` filters by `ts < ?`. `limit` defaults to `100` and is capped at `500`.
 
-```sql
-ts < ?
+The route returns entries ordered by newest first:
+
+```json
+{ "entries": [...] }
 ```
 
-`limit` defaults to `100` and is capped at `500`.
+This endpoint does not write audit records.
 
-The route returns:
+## Validation and Error Patterns
 
-```ts
-{
-  entries: results
-}
-```
+Most routes follow the same failure conventions:
 
-## Persistence and External Dependencies
+| Condition | Response |
+| --- | --- |
+| Missing tenant | `404 { "error": "tenant not found" }` |
+| Invalid JSON shape | `400 { "error": "..." }` |
+| Validation errors | `422 { "errors": [...] }` |
+| Conflict or invalid state transition | `409 { "error": "..." }` |
+| Oversized logo | `413 { "error": "logo exceeds 512 KB" }` |
 
-The Operator API primarily uses `c.env.DB`, a D1-style database binding, and `c.env.STORAGE`, an R2-style object storage binding.
+Validation is deliberately close to the write boundary:
 
-Database-heavy routes use prepared statements with positional bindings. This keeps user-controlled values out of SQL strings. Dynamic SQL is limited to assembled `WHERE` clauses from fixed column names and assignment lists from fixed field allowlists.
+- policy writes use `validatePolicySettings`
+- tenant defaults writes use `validateTenantDefaults`
+- baseline and tenant rule deltas use `validateDelta`
+- publish dry runs use `buildMergedRuleset`
+- logo uploads validate MIME type and size before R2 writes
 
-Object storage is used for:
+Read paths are generally tolerant. For example, tenant detail parsing of `baseline_rule_delta` catches malformed JSON and returns no baseline instead of failing the tenant detail request.
 
-- tenant branding logos
-- ruleset artifacts cleaned up during tenant deletion
+## Audit Logging
 
-Publishing, artifact generation, upstream sync, ID creation, timestamps, and settings resolution are delegated to library modules:
+Mutating routes usually call `writeAudit(c.env.DB, c.get("operatorEmail"), action, tenantId, details)` after the database or storage change succeeds.
 
-- `generateArtifacts` from `src/lib/artifacts`
-- `writeAudit` from `src/lib/audit`
-- `getTenant`, `getDraftDelta`, `getInstanceSettings`, `putInstanceSetting`, `getActiveSnapshot`, `newId`, `newToken`, and `nowIso` from `src/lib/db`
-- `buildMergedRuleset` and `publishTenant` from `src/lib/publish`
-- `syncUpstream` from `src/lib/upstream`
-- `validateDelta` from `src/lib/validate`
-
-## Audit Pattern
-
-Most mutating routes write an audit record after the database or storage change succeeds.
-
-Audited actions include:
+Common action names include:
 
 - `tenant.create`
+- `tenant.duplicate`
 - `tenant.update`
 - `tenant.delete`
 - `rules.draft_save`
 - `rules.rollback`
+- `rules.republish_all`
 - `branding.update`
 - `policy.update`
 - `guid.rotate`
 - `guid.revoke`
-- `instance.settings_update`
 - `events.disposition`
+- `instance.settings_update`
+- `instance.default_logo_update`
+- `instance.default_logo_remove`
 
-`upstream.sync` is handled inside `syncUpstream`.
+`upstreamRoutes.post("/")` delegates audit behavior to `syncUpstream`.
 
-The operator identity comes from:
+When adding new mutating Operator API routes, follow the existing pattern: validate input, perform the state change, then write a focused audit entry with stable action names and compact details.
 
-```ts
-c.get("operatorEmail")
-```
+## Storage Boundaries
 
-which is expected to be set by `requireOperator`.
+The Operator API touches two storage systems through `AppEnv`.
 
-## Error Handling Conventions
+D1 database access is done directly with prepared statements and helper functions from `src/lib/db.ts`. Route handlers use explicit SQL for route-specific projections and cleanup operations.
 
-The module uses compact JSON error responses.
+R2 object storage is used for:
 
-Common patterns:
+- tenant logos under `assets/${tenant.id}/logo.${extension}`
+- instance default logo under `assets/instance-default/logo.${extension}`
+- ruleset version artifacts deleted during tenant removal
 
-- `400` for invalid request bodies or missing required fields
-- `404` for missing tenants, events, GUIDs, or tenant-owned versions
-- `409` for state conflicts, such as deleting a tenant with active GUIDs or revoking an already revoked GUID
-- `413` for oversized logo uploads
-- `422` for validation failures that are syntactically valid requests
-- `502` for upstream fetch errors
+Ruleset publishing and artifact generation are delegated to `src/lib/publish.ts` and `src/lib/artifacts.ts`; the routes do not manually construct stored ruleset objects.
 
-Most handlers return plain objects through `c.json(...)` and avoid throwing for expected validation failures.
+## Adding or Changing Routes
 
-## Contribution Notes
+When contributing to this module, keep the existing route style:
 
-When adding tenant-scoped endpoints, prefer `requireTenant(c)` so missing tenants behave consistently.
-
-When accepting JSON object bodies, prefer `readJsonBody(c)` unless the route needs a different parse error message or supports multipart data.
-
-When adding mutable operator actions, write an audit record with `writeAudit` after the mutation succeeds. Use the existing action naming style: `<area>.<operation>`.
-
-When adding settings-like APIs, follow the existing allowlist pattern used by `POLICY_FIELDS`, `TEXT_FIELDS`, and `DEFAULT_INSTANCE_SETTINGS` rather than accepting arbitrary keys.
+1. Mount new feature routers from `index.ts` behind `requireOperator`.
+2. Use `Hono<AppEnv>` so handlers have typed access to `c.env` and context variables.
+3. Use `requireTenant` for tenant-scoped `/:id` routes.
+4. Use `readJsonBody` for JSON object payloads.
+5. Prefer strict validation on writes and tolerant parsing on reads when existing stored data may be malformed.
+6. Use prepared SQL with bound parameters.
+7. Audit successful mutations with `writeAudit`.
+8. Keep business logic in `src/lib/*` when the behavior is shared, complex, or not specific to HTTP request handling.

@@ -1,32 +1,38 @@
 <!-- GENERATED FILE, do not edit by hand.
-     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit dc26798.
+     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit 5adb17f.
      Regenerate: node .gitnexus/run.cjs wiki, then: npm run docs:wiki -->
 
 # Ruleset Validation & Merge
 
-The Ruleset Validation & Merge module is responsible for checking upstream rulesets, validating tenant-specific delta documents, and producing tenant-published rulesets from those inputs.
+The Ruleset Validation & Merge module validates upstream rulesets and tenant delta documents, then applies tenant-specific changes to produce a publishable ruleset.
 
-It is implemented in two files:
+It is split across two files:
 
-- `src/lib/validate.ts`: structural validation for serialized upstream rulesets and tenant deltas.
-- `src/lib/merge.ts`: pure merge logic that applies a validated tenant delta to an upstream ruleset.
+- `src/lib/validate.ts` validates serialized JSON input.
+- `src/lib/merge.ts` applies validated delta objects to ruleset objects.
 
-The module intentionally avoids a strict JSON Schema because the upstream Check ruleset format does not publish one. Instead, it enforces the project’s required safety gates while tolerating unknown upstream fields.
+The module is intentionally structural rather than schema-driven. Check does not publish a formal JSON Schema, so `validateRuleset()` enforces required shape, known safety gates, and regex correctness while tolerating unknown upstream keys.
+
+## Architecture
 
 ```mermaid
 flowchart TD
-  A[Upstream ruleset body] --> B[validateRuleset]
-  C[Tenant delta body] --> D[validateDelta]
-  B --> E[buildMergedRuleset]
-  D --> E
-  E --> F[mergeRuleset]
-  F --> G[Tenant ruleset]
-  F --> H[Version + lastUpdated stamp]
+  A[syncUpstream] --> B[validateRuleset]
+  C[routes/api/rules.ts] --> D[validateDelta]
+  E[routes/api/instance.ts] --> D
+  F[buildMergedRuleset] --> B
+  F --> D
+  F --> G[applyDelta]
+  F --> H[mergeRuleset]
+  H --> G
+  G --> I[deepMerge]
 ```
 
-## Validation Model
+The validation functions operate on JSON strings. The merge functions operate on parsed objects.
 
-Validation returns a `ValidationResult`:
+## Validation Results
+
+Both `validateRuleset()` and `validateDelta()` return `ValidationResult`:
 
 ```ts
 export interface ValidationResult {
@@ -36,47 +42,29 @@ export interface ValidationResult {
 }
 ```
 
-For both rulesets and deltas, validation parses a serialized JSON body and returns:
+When parsing fails or the parsed value is not a JSON object, `ruleset` is omitted. When JSON parses successfully but structural validation fails, the parsed object is returned as `ruleset` so callers can inspect or report against the submitted body.
 
-- `ok: true` when all checks pass.
-- `errors` containing developer/operator-readable failure messages.
-- `ruleset` containing the parsed object when parsing succeeds, even if later structural validation fails.
+## Ruleset Validation
 
-The `ruleset` property is also used by `validateDelta`; in that case it contains the parsed delta document.
+`validateRuleset(body: string)` validates a serialized upstream or merged ruleset.
 
-## Upstream Ruleset Validation
+It runs five validation gates.
 
-`validateRuleset(body: string)` validates a serialized upstream ruleset body.
+### Gate 1: Size And JSON Object
 
-It runs five gates:
+The ruleset body must be smaller than `MAX_RULESET_BYTES`, which is currently `1024 * 1024`.
 
-1. Size and JSON parsing.
-2. Required top-level sections.
-3. Per-indicator structural checks.
-4. Regex compilation checks for trusted and exclusion patterns.
-5. JSON round-trip safety.
+Bodies at or above the cap fail with:
 
-### Size and JSON Parsing
-
-Rulesets are capped by `MAX_RULESET_BYTES`:
-
-```ts
-export const MAX_RULESET_BYTES = 1024 * 1024;
+```text
+body is 1 MB or larger
 ```
 
-`validateRuleset` measures UTF-8 byte length using `TextEncoder`. Bodies that are `1 MB` or larger fail immediately:
+The body must parse as JSON and the parsed value must be a non-array object. Invalid JSON and top-level arrays/nulls are rejected.
 
-```ts
-if (new TextEncoder().encode(body).length >= MAX_RULESET_BYTES) {
-  return { ok: false, errors: ["body is 1 MB or larger"] };
-}
-```
+### Gate 2: Required Sections
 
-The body must parse as a JSON object. Arrays, `null`, invalid JSON, and scalar values fail validation.
-
-### Required Sections
-
-The ruleset must contain these top-level sections:
+The following top-level sections must exist:
 
 ```ts
 const REQUIRED_SECTIONS = [
@@ -89,48 +77,49 @@ const REQUIRED_SECTIONS = [
 ];
 ```
 
-Unknown top-level keys are allowed. This keeps validation compatible with future upstream fields while still enforcing the sections required by the publishing pipeline.
+Unknown additional sections are allowed. This keeps validation tolerant of future upstream fields while still ensuring the ruleset has the expected operational sections.
 
-### Phishing Indicator Checks
+### Gate 3: Phishing Indicator Checks
 
-When `phishing_indicators` exists, it must be an array. Each entry must be an object.
+If `phishing_indicators` exists, it must be an array.
 
-For each indicator, `validateRuleset` checks:
+Each indicator must be an object with a non-empty string `id`. Duplicate IDs are rejected across the array.
 
-- `id` exists and is a non-empty string.
-- `id` values are unique within the array.
-- `pattern`, when present, compiles as a JavaScript `RegExp`.
-- `severity`, when present, is one of `low`, `medium`, `high`, or `critical`.
-- `action`, when present, is one of `block`, `warn`, or `monitor`.
-- `confidence`, when present, is a number between `0` and `1`.
+For each indicator:
 
-Regex validation is handled by the private helper `compileRegex(pattern, flags)`. If the indicator has a `flags` property and it is a string, those flags are passed to `new RegExp`.
+- `pattern`, when present, must compile as a JavaScript `RegExp`.
+- `flags`, when present and a string, are passed to the `RegExp` constructor.
+- `severity`, when present, must be one of `low`, `medium`, `high`, or `critical`.
+- `action`, when present, must be one of `block`, `warn`, or `monitor`.
+- `confidence`, when present, must be a number from `0` through `1`.
 
-### Trusted Login and Exclusion Pattern Checks
+Regex validation is centralized in the private `compileRegex(pattern, flags)` helper.
 
-`trusted_login_patterns` must be an array when present. Each entry is compiled as a regex without flags.
+### Gate 4: Trusted And Exclusion Pattern Checks
 
-`exclusion_system` must be an object when present. If it contains `domain_patterns`, each domain pattern is compiled as a regex.
+`trusted_login_patterns`, when present, must be an array of regex pattern strings. Each entry is compiled with `compileRegex(pattern, undefined)`.
 
-The code only validates `exclusion_system.domain_patterns` when that property is an array. Unknown fields inside `exclusion_system` are tolerated.
+`exclusion_system`, when present, must be an object. If it contains `domain_patterns`, that property is expected to be an array and each pattern is compiled.
 
-### JSON Round Trip
+The validator only checks `exclusion_system.domain_patterns` when it is an array. Other `exclusion_system` keys are tolerated.
 
-The final gate verifies the parsed object can survive:
+### Gate 5: JSON Round Trip
+
+The parsed ruleset must survive:
 
 ```ts
 JSON.parse(JSON.stringify(ruleset))
 ```
 
-The serialized form of the round-tripped object must match the serialized form of the parsed ruleset. This catches values that cannot be safely represented in JSON-compatible output.
+The stringified result must match the original parsed object after stringification. This catches values that cannot be represented cleanly through JSON serialization.
 
-## Tenant Delta Validation
+## Delta Validation
 
-`validateDelta(body: string)` validates per-tenant delta documents before they are merged.
+`validateDelta(body: string)` validates a serialized per-tenant delta document.
 
-Unlike upstream ruleset validation, delta validation is strict about top-level keys. This prevents operator typos from silently producing no changes.
+Unlike ruleset validation, delta validation is strict about top-level keys. This is intentional: tenant deltas are operator-authored, and unknown keys are more likely to be typos than forward-compatible upstream additions.
 
-Allowed delta keys are:
+Allowed delta keys are defined by `DELTA_KEYS`:
 
 ```ts
 export const DELTA_KEYS = [
@@ -142,52 +131,42 @@ export const DELTA_KEYS = [
 ];
 ```
 
-Any other key produces an `unknown delta key` error.
+Unknown keys produce errors such as:
+
+```text
+unknown delta key: add_trusted_logins
+```
 
 ### Additive Pattern Fields
 
-These fields are optional, but when present must be arrays:
+The following fields must be arrays when present:
 
 - `add_exclusion_domain_patterns`
 - `add_trusted_login_patterns`
 
-Every entry is compiled using `compileRegex(pattern, undefined)`.
+Each item must compile as a regex pattern string. Invalid values are reported with the array key and index.
 
-### Indicator Additions and Suppressions
+### Added Indicators
 
-`add_phishing_indicators` must be an array when present. `validateDelta` does not perform the full per-indicator validation used by `validateRuleset`; the merged output is expected to pass `validateRuleset` later in the publish path.
+`add_phishing_indicators`, when present, must be an array.
 
-`suppress_indicator_ids` must be an array of strings. These IDs are used by `mergeRuleset` to remove matching upstream indicators before tenant-added indicators are appended.
+`validateDelta()` does not fully validate the objects inside `add_phishing_indicators`. Instead, the merged output is expected to pass through `validateRuleset()`, where duplicate indicator IDs, regex patterns, severity, action, and confidence are checked in the context of the final ruleset.
+
+### Suppressed Indicators
+
+`suppress_indicator_ids`, when present, must be an array of strings.
+
+Each non-string entry is reported by index.
 
 ### Raw Overrides
 
-`raw_overrides` must be an object when present. It is the escape hatch for tenant-specific changes that are not covered by the additive delta fields.
+`raw_overrides`, when present, must be a non-array object.
 
-Because `raw_overrides` can replace arbitrary fields during merge, contributors should treat it as a powerful compatibility mechanism rather than the preferred extension point.
+This field is the escape hatch for structured changes that are not covered by the additive delta fields. Its contents are not deeply validated by `validateDelta()`; the final merged ruleset should be validated with `validateRuleset()`.
 
 ## Merge Model
 
-`mergeRuleset(upstream, delta, options)` applies a `TenantDelta` to an upstream ruleset and returns a new merged object.
-
-```ts
-export function mergeRuleset(
-  upstream: Record<string, unknown>,
-  delta: TenantDelta,
-  options: MergeOptions,
-): Record<string, unknown>
-```
-
-The merge function is pure with respect to its inputs. It starts by deep-copying the upstream object:
-
-```ts
-let merged: Record<string, unknown> = JSON.parse(JSON.stringify(upstream));
-```
-
-This allows callers to reuse the same upstream snapshot for multiple tenants without cross-tenant mutation.
-
-## TenantDelta
-
-`TenantDelta` defines the supported merge operations:
+`src/lib/merge.ts` defines the shape of a tenant delta:
 
 ```ts
 export interface TenantDelta {
@@ -199,19 +178,81 @@ export interface TenantDelta {
 }
 ```
 
-The merge order is significant:
+The merge engine is pure with respect to its inputs: it deep-copies the base ruleset before mutation and returns a new merged object.
 
-1. Append trusted login patterns.
-2. Append exclusion domain patterns.
-3. Suppress and append phishing indicators.
-4. Apply `raw_overrides`.
-5. Stamp `version` and `lastUpdated`.
+The intended layering model is:
 
-Because `raw_overrides` runs late, it can replace or modify fields created by earlier merge steps. Because version stamping runs last, `raw_overrides.version` and `raw_overrides.lastUpdated` do not control the final published values.
+1. Start with an upstream ruleset snapshot.
+2. Apply an instance baseline delta with `applyDelta()`.
+3. Apply a tenant delta with `mergeRuleset()` or another `applyDelta()` call.
+4. Validate the final result with `validateRuleset()` before publishing.
 
-## MergeOptions
+Because additive arrays append to the current input, callers should re-merge from the same upstream snapshot and delta when rebuilding a tenant ruleset. Applying the same delta repeatedly to an already-merged object will append the additive entries again.
 
-`MergeOptions` supplies the publish-time metadata:
+## `applyDelta()`
+
+`applyDelta(base, delta)` applies tenant changes without version stamping.
+
+It begins by deep-copying `base` through JSON serialization:
+
+```ts
+let merged: Record<string, unknown> = JSON.parse(JSON.stringify(base));
+```
+
+This lets callers reuse the same upstream object across multiple tenants without cross-tenant mutation.
+
+### Trusted Login Patterns
+
+When `delta.add_trusted_login_patterns` contains values, they are appended to `merged.trusted_login_patterns`.
+
+If the existing section is missing or not an array, it is treated as an empty array.
+
+### Exclusion Domain Patterns
+
+When `delta.add_exclusion_domain_patterns` contains values, they are appended to:
+
+```ts
+merged.exclusion_system.domain_patterns
+```
+
+If `merged.exclusion_system` is not a plain object, it is treated as `{}`. Existing non-array `domain_patterns` values are treated as empty.
+
+### Phishing Indicator Suppression And Addition
+
+Suppression and addition are handled together.
+
+`delta.suppress_indicator_ids` is converted to a `Set`, then existing indicators whose `id` is in that set are removed. After suppression, `delta.add_phishing_indicators` is appended.
+
+This ordering matters: a tenant delta can suppress an upstream or baseline-added indicator, then add replacement indicators.
+
+### Raw Overrides
+
+If `delta.raw_overrides` exists and is not empty, it is merged last using `deepMerge()`.
+
+Raw overrides therefore win over all additive delta behavior.
+
+## `deepMerge()`
+
+`deepMerge(base, override)` recursively merges plain objects.
+
+The merge rule is simple:
+
+- If both existing and override values are plain objects, merge them recursively.
+- Otherwise, the override value replaces the base value.
+
+Arrays are not merged element-by-element. An override array replaces the existing value.
+
+The helper `isPlainObject()` defines the object boundary:
+
+```ts
+value !== null && typeof value === "object" && !Array.isArray(value)
+```
+
+## `mergeRuleset()`
+
+`mergeRuleset(upstream, delta, options)` applies a delta and stamps publish metadata.
+
+Its options are:
 
 ```ts
 export interface MergeOptions {
@@ -221,71 +262,79 @@ export interface MergeOptions {
 }
 ```
 
-After merge, the ruleset version is rewritten as:
+After calling `applyDelta()`, it derives the upstream version from `merged.version`.
+
+If `merged.version` is a non-empty string, that value is used. Otherwise, it falls back to `0.0.0`.
+
+Build metadata is stripped by splitting on `+`, then tenant-specific build metadata is added:
 
 ```ts
-`${baseVersion}+${options.suffixLabel}.${options.versionNumber}`
+merged.version = `${baseVersion}+${options.suffixLabel}.${options.versionNumber}`;
 ```
 
-`baseVersion` is taken from `merged.version` before any existing build metadata suffix. For example, an upstream version of `1.2.3+upstream.7` becomes:
-
-```text
-1.2.3+tenantLabel.42
-```
-
-If `merged.version` is missing or not a non-empty string, the base version defaults to `0.0.0`.
-
-`lastUpdated` is always set to `options.publishedAt`.
-
-## Deep Merge Behavior
-
-`raw_overrides` is applied through the private recursive helper `deepMerge(base, override)`.
-
-The helper uses `isPlainObject(value)` to distinguish mergeable objects from arrays and scalars:
+For example, an upstream version of `1.2.3+upstream.4` with:
 
 ```ts
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+{
+  suffixLabel: "tenant",
+  versionNumber: 7,
+  publishedAt: "2026-07-09T12:00:00.000Z"
 }
 ```
 
-Merge rules:
+becomes:
 
-- Plain objects merge recursively.
-- Arrays replace the existing value.
-- Scalars replace the existing value.
-- `null` replaces the existing value.
+```text
+1.2.3+tenant.7
+```
 
-This means `raw_overrides` can surgically update nested object fields, but cannot append to arrays. Array append behavior is only provided by the explicit additive delta fields.
+`lastUpdated` is set to `options.publishedAt`.
 
-## Integration Points
+## Codebase Integration
 
-The module is used by the publishing and ingestion paths:
+`validateRuleset()` is used anywhere a complete ruleset enters or leaves the system:
 
-- `syncUpstream` calls `validateRuleset` to validate fetched upstream rulesets.
-- `buildMergedRuleset` calls `validateRuleset`, `validateDelta`, and `mergeRuleset` while preparing tenant output.
-- `publishTenant` reaches validation through `buildMergedRuleset`.
-- `routes/api/rules.ts` calls `validateDelta`, likely to validate operator-submitted tenant deltas.
-- `test/validate.test.ts` covers `validateRuleset` and `validateDelta`.
-- `test/merge.test.ts` covers `mergeRuleset` and merged-output validation.
+- `syncUpstream()` validates upstream rulesets before accepting them.
+- `buildMergedRuleset()` validates source and final rulesets during publish.
+- `merge.test.ts` and `validate.test.ts` cover expected validation behavior.
 
-The internal call graph is intentionally small:
+`validateDelta()` is used at tenant and instance delta boundaries:
 
-- `validateRuleset` and `validateDelta` share `compileRegex`.
-- `mergeRuleset` uses `isPlainObject` directly and through `deepMerge`.
-- `deepMerge` is recursive.
+- `routes/api/rules.ts` validates tenant rule delta submissions.
+- `routes/api/instance.ts` validates instance-level delta submissions.
+- `buildMergedRuleset()` validates deltas before merge during publish.
+- `republishAllTenants()` reaches it through `publishTenant()` and `buildMergedRuleset()`.
 
-There are no outgoing project-level calls from this module. Its only external dependencies are built-in JavaScript runtime features such as `JSON.parse`, `JSON.stringify`, `RegExp`, `Set`, and `TextEncoder`.
+`applyDelta()` and `mergeRuleset()` are used by the publishing path:
+
+- `buildMergedRuleset()` calls `applyDelta()` for baseline layering.
+- `buildMergedRuleset()` calls `mergeRuleset()` for tenant-specific output and version stamping.
+
+## Error Handling Pattern
+
+Validation functions accumulate structural errors where possible instead of failing fast after parsing. This lets callers return a complete list of operator-fixable problems.
+
+Examples include:
+
+```text
+missing required section: phishing_indicators
+duplicate indicator id: suspicious-domain
+indicator suspicious-domain: illegal severity: severe
+trusted_login_patterns[2] does not compile: Invalid regular expression
+unknown delta key: add_trusted_patterns
+```
+
+Parsing and top-level type errors return immediately because there is no reliable object structure to inspect.
 
 ## Contributor Notes
 
-When changing validation behavior, preserve the distinction between upstream rulesets and tenant deltas:
+When adding new ruleset sections, prefer extending `validateRuleset()` only where the section is required for runtime correctness. Unknown upstream keys are intentionally tolerated.
 
-- Upstream rulesets should remain tolerant of unknown fields.
-- Tenant deltas should remain strict about unknown top-level keys.
-- Regex-bearing fields should continue to fail early through `compileRegex`.
-- Added delta fields should be reflected in both `DELTA_KEYS` and `TenantDelta`.
+When adding new delta operations:
 
-When changing merge behavior, keep the merge order in mind. Existing behavior depends on `raw_overrides` being applied after additive operations and publish metadata being stamped last.
+1. Add the key to `DELTA_KEYS`.
+2. Validate its serialized form in `validateDelta()`.
+3. Apply it in `applyDelta()`.
+4. Ensure the final merged document is still validated through `validateRuleset()`.
 
-If new tenant customization features are added, prefer explicit delta fields over expanding reliance on `raw_overrides`. Explicit fields are easier to validate, test, and reason about during publishing.
+Keep raw override behavior last unless there is a strong reason to change precedence. Today, `raw_overrides` is the highest-precedence escape hatch and can replace arrays, scalars, or nested object fields after all additive merge operations.

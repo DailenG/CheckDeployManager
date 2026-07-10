@@ -1,235 +1,265 @@
 <!-- GENERATED FILE, do not edit by hand.
-     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit dc26798.
+     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit 5adb17f.
      Regenerate: node .gitnexus/run.cjs wiki, then: npm run docs:wiki -->
 
 # Publishing & Artifacts
 
-The Publishing & Artifacts module turns tenant configuration into deployable policy outputs.
+The Publishing & Artifacts module turns tenant configuration into deployable Check extension policy outputs.
 
-It has two main responsibilities:
+It has two distinct responsibilities:
 
-1. `src/lib/publish.ts` validates and publishes tenant ruleset versions.
-2. `src/lib/artifacts.ts` generates browser deployment artifacts from current D1 state.
-
-Published rulesets are stored in R2 and recorded in D1. Deployment artifacts are rendered fresh on demand and are never stored.
+- `src/lib/publish.ts` publishes tenant rulesets by merging tenant deltas with the active upstream snapshot, validating the result, storing the JSON ruleset in R2, and recording a version in D1.
+- `src/lib/artifacts.ts` generates deployment artifacts for browser policy rollout from current D1 state. Generated artifacts are rendered fresh on demand and are not stored.
 
 ```mermaid
 flowchart TD
-  Delta[tenant delta JSON] --> Build[buildMergedRuleset]
-  Build --> Snapshot[active upstream snapshot]
-  Snapshot --> Merge[mergeRuleset]
-  Merge --> Validate[validateRuleset]
-  Validate --> Publish[publishTenant]
-  Publish --> R2[R2 rules JSON]
-  Publish --> D1[D1 ruleset_versions]
-  D1 --> Artifacts[generateArtifacts]
-  Artifacts --> Bundle[buildArtifactBundle]
+  A[Tenant delta] --> B[buildMergedRuleset]
+  C[Active upstream snapshot] --> B
+  D[Instance baseline delta] --> B
+  B --> E[publishTenant]
+  E --> F[R2 rules JSON]
+  E --> G[ruleset_versions + tenant current_version_id]
+  G --> H[generateArtifacts]
+  H --> I[Managed storage, reg, GPO, RMM, Intune, CIPP]
 ```
 
 ## Publishing Rulesets
 
-Publishing creates an immutable tenant ruleset version from:
+Publishing creates immutable tenant ruleset versions. The public rules endpoint later serves these published versions by tenant GUID.
 
-- a tenant delta JSON document
-- the active upstream snapshot
-- instance settings
-- operator metadata
+The main entry points are:
 
-The public entry point is `publishTenant(env, tenantId, deltaJson, operator, note?)`.
+- `buildMergedRuleset(env, deltaJson, versionNumber)`
+- `publishTenant(env, tenantId, deltaJson, operator, note?)`
+- `republishAllTenants(env, publishAs, note, auditOperator)`
+- `loadSnapshotRuleset(env, snapshot)`
+- `formatEtagHeader(etagHash)`
 
-### Publish Flow
+### `buildMergedRuleset`
 
-`publishTenant` first determines the next `version_number` for the tenant:
+`buildMergedRuleset` is the shared merge-and-validation path used by publishing, dry-run validation, and live preview endpoints.
+
+The function performs the publishing gates in this order:
+
+1. Validate the tenant delta with `validateDelta(deltaJson)`.
+2. Load the active upstream snapshot row with `getActiveSnapshot(env.DB)`.
+3. Load the upstream ruleset JSON from R2 via `loadSnapshotRuleset(env, snapshot)`.
+4. Load instance settings with `getInstanceSettings(env.DB)`.
+5. Apply `settings.baseline_rule_delta` underneath the tenant delta, when present.
+6. Merge the tenant delta with `mergeRuleset`.
+7. Validate the final merged ruleset with `validateRuleset`.
+
+The baseline delta is intentionally applied before the tenant delta:
 
 ```ts
+base = applyDelta(upstream, baselineCheck.ruleset as TenantDelta);
+const merged = mergeRuleset(base, delta, {
+  suffixLabel: settings.version_suffix_label,
+  versionNumber,
+  publishedAt: nowIso(),
+});
+```
+
+That means instance-wide MSP defaults become the base policy, while tenant-specific settings can still override or extend them through the tenant delta.
+
+If the active upstream snapshot is missing, publishing fails with:
+
+```text
+no active upstream snapshot; run an upstream sync first
+```
+
+If the R2 object referenced by the active snapshot is missing, publishing fails with:
+
+```text
+active upstream snapshot object missing from R2: <r2_key>
+```
+
+A stored bad `baseline_rule_delta` is treated as a hard failure. Errors from that validation path are prefixed with `baseline_rule_delta:` so operators can distinguish instance settings failures from tenant delta failures.
+
+### `loadSnapshotRuleset`
+
+`loadSnapshotRuleset(env, snapshot)` reads the upstream snapshot object from R2 using `snapshot.r2_key`.
+
+It returns:
+
+- parsed JSON object when the R2 object exists
+- `null` when `env.STORAGE.get(snapshot.r2_key)` returns `null`
+
+The caller is responsible for deciding whether missing storage is recoverable. `buildMergedRuleset` treats it as a publishing error.
+
+### `publishTenant`
+
+`publishTenant` creates the next ruleset version for one tenant.
+
+It first computes the next version number from D1:
+
+```sql
 SELECT MAX(version_number) AS max_version
 FROM ruleset_versions
 WHERE tenant_id = ?
 ```
 
-The next version is `max_version + 1`, or `1` when the tenant has no published versions.
+The new `versionNumber` is `max_version + 1`, or `1` for a tenant with no published versions.
 
-It then calls `buildMergedRuleset(env, deltaJson, versionNumber)`, which performs all validation and merge gates before anything is written.
-
-If the merged ruleset is valid, `publishTenant`:
+After `buildMergedRuleset` succeeds, `publishTenant`:
 
 1. Serializes the merged ruleset as pretty JSON.
-2. Computes a SHA-256 hash with `sha256Hex`.
-3. Writes the JSON body to R2 under `rules/{tenantId}/{versionNumber}.json`.
+2. Computes a SHA-256 hash with `sha256Hex(body)`.
+3. Writes the JSON to R2 at `rules/${tenantId}/${versionNumber}.json`.
 4. Inserts a row into `ruleset_versions`.
 5. Updates `tenants.current_version_id`.
-6. Writes a `rules.publish` audit event through `writeAudit`.
+6. Writes a `rules.publish` audit event with `writeAudit`.
 
-The success result includes:
+The inserted version row stores the original `deltaJson` alongside the generated ruleset metadata. That frozen delta is important for later republishing: automatic republish operations use the previously published delta, not an operator draft.
+
+Successful publishes return:
 
 ```ts
 {
   ok: true,
   versionId,
   versionNumber,
-  etag
+  etag,
 }
 ```
 
-Validation or merge failures return:
+Failures return:
 
 ```ts
 {
   ok: false,
-  errors: string[]
+  errors,
 }
 ```
 
-### `buildMergedRuleset`
+The `etag` value is the full SHA-256 hex digest of the stored JSON body. HTTP callers format it with `formatEtagHeader`.
 
-`buildMergedRuleset` is the shared publishing gate. It is used by publishing, dry-run validation, and live preview routes.
+### `formatEtagHeader`
 
-Its responsibilities are deliberately broader than just merging:
-
-1. Validate the tenant delta with `validateDelta`.
-2. Load the active upstream snapshot with `getActiveSnapshot`.
-3. Fetch the snapshot body from R2 through `loadSnapshotRuleset`.
-4. Read instance settings with `getInstanceSettings`.
-5. Merge upstream rules and tenant delta through `mergeRuleset`.
-6. Validate the final merged ruleset with `validateRuleset`.
-
-The version metadata passed into `mergeRuleset` comes from instance settings and runtime state:
+`formatEtagHeader(etagHash)` converts the stored hash into the HTTP header form used by the rules routes:
 
 ```ts
-{
-  suffixLabel: settings.version_suffix_label,
-  versionNumber,
-  publishedAt: nowIso()
-}
+"sha256-${etagHash.slice(0, 12)}"
 ```
 
-Because `buildMergedRuleset` validates both the input delta and the final merged output, callers can rely on an `ok: true` result being safe to publish or preview.
-
-### Snapshot Loading
-
-`loadSnapshotRuleset(env, snapshot)` loads the upstream snapshot JSON from R2 using `snapshot.r2_key`.
-
-It returns `null` when the R2 object is missing. `buildMergedRuleset` converts that into a publish-blocking error:
-
-```ts
-active upstream snapshot object missing from R2: {snapshot.r2_key}
-```
-
-This function is also used by `syncUpstream`, so changes to its behavior affect both publishing and upstream sync logic.
-
-### ETags
-
-`formatEtagHeader(etagHash)` formats stored SHA-256 hashes for HTTP responses:
-
-```ts
-"sha256-{first12chars}"
-```
-
-For example, a stored hash beginning with `abcdef123456...` becomes:
+The resulting value is quoted, for example:
 
 ```http
-ETag: "sha256-abcdef123456"
+ETag: "sha256-abc123def456"
 ```
 
-Routes in `src/routes/rules.ts` use this helper when serving ruleset content.
+The helper is called by `src/routes/rules.ts` and `rulesHeaders`.
+
+### `republishAllTenants`
+
+`republishAllTenants` republishes every tenant that already has a current version.
+
+It selects tenants by joining `tenants.current_version_id` to `ruleset_versions.id`:
+
+```sql
+SELECT t.id AS tenant_id, v.delta_json
+FROM tenants t
+JOIN ruleset_versions v ON v.id = t.current_version_id
+```
+
+For each row, it calls:
+
+```ts
+publishTenant(env, row.tenant_id, row.delta_json, publishAs, note)
+```
+
+This deliberately republishes the frozen delta from the current published version. It does not use any draft state.
+
+This function is shared by:
+
+- upstream sync auto-publish in `src/lib/upstream.ts`
+- baseline-delta republish actions in `routes/api/instance.ts`
+
+Failures are collected per tenant and audited as `rules.publish_failed` with the supplied `auditOperator`.
 
 ## Artifact Generation
 
-Artifacts are generated from current database state by `generateArtifacts(env, tenantId, requestedGuid?)`.
+Artifact generation renders deployment material for a tenant GUID. Unlike published rulesets, artifacts are not persisted. Everything is generated from D1 state each time.
 
-Unlike published rulesets, artifacts are not persisted. They are rendered fresh every time from:
+The main entry points are:
 
-- instance settings
-- active tenant GUID
-- tenant branding
-- tenant policy settings
+- `generateArtifacts(env, tenantId, requestedGuid?)`
+- `buildArtifactBundle(input)`
 
-The pure rendering function is `buildArtifactBundle(input)`, which makes artifact generation easy to test without D1 or R2.
+`generateArtifacts` is the database-backed route helper. `buildArtifactBundle` is a pure renderer used by tests and golden artifact generation.
 
-## Artifact Outputs
+### `generateArtifacts`
 
-`ArtifactBundle` contains all deployment formats produced by the module:
+`generateArtifacts` loads the runtime state needed to build artifacts:
 
-```ts
-interface ArtifactBundle {
-  guid: string;
-  config_url: string;
-  hook_url: string;
-  logo_url: string;
-  chrome_managed_storage: Record<string, unknown>;
-  edge_managed_storage: Record<string, unknown>;
-  firefox_fragment: Record<string, unknown>;
-  firefox_policies_full: Record<string, unknown>;
-  reg_chrome: string;
-  reg_edge: string;
-  intune_variables: string;
-  cipp_fields: { field: string; value: string }[];
-}
+1. Instance settings from `getInstanceSettings(env.DB)`.
+2. Public base URL from `settings.public_base_url`.
+3. Active tenant GUID from `tenant_guids`, or a specific active GUID when `requestedGuid` is supplied.
+4. Tenant branding from `tenant_branding`.
+5. Tenant policy settings from `tenant_policy_settings`.
+6. Instance tenant defaults through `parseTenantDefaults(settings.tenant_defaults ?? "")`.
+
+Artifact generation requires `public_base_url`. If it is empty after trimming trailing slashes, generation fails with:
+
+```text
+public_base_url is not set; configure it under instance settings before generating artifacts
 ```
 
-The bundle targets Chrome, Edge, Firefox, Intune, and CIPP deployment workflows.
+If no active GUID exists for the tenant, generation fails with:
 
-## `generateArtifacts`
-
-`generateArtifacts` is the database-backed artifact entry point used by `routes/api/artifacts.ts`.
-
-It first loads instance settings and requires `public_base_url` to be configured. If the setting is empty, it returns:
-
-```ts
-{
-  ok: false,
-  error: "public_base_url is not set; configure it under instance settings before generating artifacts"
-}
-```
-
-It then resolves the tenant GUID:
-
-- if `requestedGuid` is provided, it must match an active GUID for the tenant
-- otherwise, the newest active tenant GUID is selected
-
-If no active GUID exists, generation fails with:
-
-```ts
+```text
 tenant has no active GUID
 ```
 
-Branding is loaded from `tenant_branding`. If no row exists, an empty default branding record is used with `primary_color` set to `#F77F00`.
+When no branding row exists, `generateArtifacts` supplies a default `TenantBrandingRow` using `CHECK_DEFAULT_PRIMARY_COLOR`.
 
-Policy settings are loaded from `tenant_policy_settings.settings_json`; missing settings default to `{}`.
+### `buildArtifactBundle`
 
-Finally, `generateArtifacts` calls `buildArtifactBundle`.
+`buildArtifactBundle(input)` is the pure renderer. Given an `ArtifactInput`, it returns an `ArtifactBundle` containing URLs, managed storage payloads, browser policy files, scripts, Intune variables, CIPP fields, and warnings.
 
-## `buildArtifactBundle`
-
-`buildArtifactBundle(input)` is a pure renderer. It performs no database or storage access.
-
-It normalizes `baseUrl` by removing trailing slashes, resolves policy defaults through `resolvePolicy`, then constructs tenant URLs:
+It derives tenant URLs from the normalized base URL and GUID:
 
 ```ts
-const configUrl = `${baseUrl}/rules/${guid}.json`;
-const hookUrl = `${baseUrl}/hook/${guid}`;
-const logoUrl = branding.logo_r2_key !== null
-  ? `${baseUrl}/assets/${guid}/logo`
-  : "";
+const configUrl = `${baseUrl}/rules/${input.guid}.json`;
+const hookUrl = `${baseUrl}/hook/${input.guid}`;
+const logoUrl = `${baseUrl}/assets/${input.guid}/logo`;
 ```
 
-The same managed storage payload is used for both Chrome and Edge:
+`logoUrl` is only emitted when the tenant has a logo object or when an instance default logo should be used. An empty logo URL tells the Check extension to use its built-in logo.
 
-```ts
-chrome_managed_storage: managedStorage,
-edge_managed_storage: managedStorage,
-```
+The returned bundle includes:
 
-Firefox artifacts are generated in two forms:
+- `chrome_managed_storage`
+- `edge_managed_storage`
+- `firefox_fragment`
+- `firefox_policies_full`
+- `reg_chrome`
+- `reg_edge`
+- `gpo_script`
+- `rmm_script`
+- `intune_variables`
+- `cipp_fields`
+- `warnings`
 
-- `firefox_fragment`: only the managed-storage fragment under `policies["3rdparty"]`
-- `firefox_policies_full`: a complete Firefox `policies.json` structure with extension install settings
+Chrome and Edge managed storage currently share the same payload object. Browser-specific differences are handled in registry and script generation.
 
 ## Policy Resolution
 
-`resolvePolicy(settings, defaultCippServerUrl)` converts loose tenant policy JSON into a typed `ResolvedPolicy`.
+`resolvePolicy` combines three layers:
 
-It applies defaults for missing or invalid values:
+1. Hardcoded fallbacks in `resolvePolicy`
+2. Instance-level defaults from `tenantDefaults.policy`
+3. Tenant-specific `policySettings`
+
+The merge pattern is:
+
+```ts
+const settings = { ...policyDefaults, ...tenantSettings };
+```
+
+Tenant keys win outright. Missing tenant keys inherit instance defaults, and missing defaults fall back to hardcoded values.
+
+Important fallbacks include:
 
 - `updateInterval`: `24`
 - `enablePageBlocking`: `true`
@@ -238,28 +268,42 @@ It applies defaults for missing or invalid values:
 - `validPageBadgeTimeout`: `5`
 - `enableDebugLogging`: `false`
 - `urlAllowlist`: `[]`
-- `genericWebhook.events`: `["false_positive_report", "page_blocked", "threat_detected"]`
 - `domainSquatting`: `{ enabled: true, deviationThreshold: 2, Action: "block" }`
+- `genericWebhook.events`: `["false_positive_report", "page_blocked", "threat_detected"]`
 
-`asBoolean` and `asNumber` are intentionally strict. They only accept actual boolean and finite number values; strings like `"true"` or `"24"` do not pass type checks and fall back to defaults.
+CIPP reporting is only enabled when both conditions are true:
 
-CIPP reporting is only enabled when both conditions are met:
+- `enableCippReporting` resolves to `true`
+- a non-empty CIPP server URL is available from tenant settings or `defaultCippServerUrl`
+
+This prevents a fresh install with no CIPP server configured from emitting enabled CIPP policy.
+
+## Branding Resolution
+
+`resolveBranding` applies instance branding defaults per field.
+
+Only fields listed in `INHERITABLE_BRANDING_FIELDS` inherit from instance defaults. A tenant field with an empty string means “use the instance default” for those fields.
+
+Logo handling is intentionally separate. Logo URLs are resolved in `buildArtifactBundle`, and the asset route handles fallback content so tenant URLs remain stable.
+
+`CHECK_DEFAULT_PRIMARY_COLOR` is exported as:
 
 ```ts
-cippServerUrl.length > 0 &&
-asBoolean(settings.enableCippReporting, false)
+export const CHECK_DEFAULT_PRIMARY_COLOR = "#F77F00";
 ```
 
-This prevents a fresh install with no configured CIPP server from emitting enabled CIPP settings.
+When `branding.use_default_logo === 1`, `resolveBranding` pins `primary_color` to the Check default color. This preserves the tenant’s stored custom color for later use if the tenant opts out of the default look.
 
-## Managed Storage
+## Managed Storage Payload
 
-`buildManagedStorage(policy, branding, urls)` creates the extension policy payload shared by Chrome, Edge, and Firefox.
+`buildManagedStorage(policy, branding, urls)` produces the canonical extension policy payload. This object is reused across Chrome, Edge, and Firefox policy formats.
 
 The payload includes:
 
 - `customRulesUrl`
-- update and UI behavior settings
+- update and page-blocking settings
+- notification and badge settings
+- debug logging flag
 - `urlAllowlist`
 - optional CIPP fields
 - `genericWebhook`
@@ -275,148 +319,178 @@ if (policy.enableCippReporting) {
 }
 ```
 
-Branding fields come directly from `TenantBrandingRow`, with `logoUrl` derived from whether `logo_r2_key` exists.
+This keeps disabled CIPP deployments from carrying stale server or tenant values.
 
-## Registry Artifacts
+## Registry-Based Artifacts
 
-`buildRegFile(browser, payload)` renders Windows `.reg` content for Chrome or Edge.
+Registry output is centralized around `registryWrites(browser, payload)`.
 
-The browser choice changes:
+That function returns an ordered list of `RegistryWrite` objects describing every registry value needed for Chrome or Edge policy deployment. Both `.reg` files and PowerShell scripts use this same table, which prevents drift between artifact formats.
 
-- policy hive path
-- extension ID
-- extension update URL
+Browser differences handled there include:
 
-Chrome uses:
+- Chrome extension ID: `benimdeioplgkhanklclahllklceahbe`
+- Edge extension ID: `knepjpocdagponkonnbggpcnhnaikajg`
+- Chrome update URL: `https://clients2.google.com/service/update2/crx`
+- Edge update URL: `https://edge.microsoft.com/extensionwebstorebase/v1/crx`
+- Chrome toolbar pin key: `toolbar_pin = force_pinned`
+- Edge toolbar pin key: `toolbar_state = force_shown`
 
-```ts
-CHROME_EXTENSION_ID = "benimdeioplgkhanklclahllklceahbe"
-CHROME_UPDATE_URL = "https://clients2.google.com/service/update2/crx"
-```
+`buildRegFile(browser, payload)` renders the ordered writes into Windows `.reg` format. It groups consecutive values with the same subkey into the same section and uses CRLF line endings.
 
-Edge uses:
+String and DWORD formatting is handled by:
 
-```ts
-EDGE_EXTENSION_ID = "knepjpocdagponkonnbggpcnhnaikajg"
-EDGE_UPDATE_URL = "https://edge.microsoft.com/extensionwebstorebase/v1/crx"
-```
+- `regEscape`
+- `regString`
+- `regDword`
 
-Registry string escaping is handled by `regEscape`, `regString`, and `regNumberedStrings`. Numeric and boolean values are rendered as DWORD values through `regDword`.
+## PowerShell Artifacts
 
-Arrays such as `urlAllowlist` and webhook `events` are emitted as numbered registry values:
+The module generates three PowerShell-oriented outputs:
 
-```reg
-"1"="value"
-"2"="value"
-```
+- `gpo_script`
+- `rmm_script`
+- `intune_variables`
 
-The generated registry structure includes:
+PowerShell string escaping is centralized in:
 
-- forced extension installation
-- extension update URL
-- root policy values
-- optional `urlAllowlist`
-- `genericWebhook`
-- webhook `events`
-- `domainSquatting`
-- `customBranding`
+- `toAscii`
+- `powershellQuote`
+- `powershellSingleQuote`
+- `powershellArray`
 
-## Intune Variables
+Generated scripts intentionally reduce non-ASCII characters to `?` through `toAscii`. This keeps generated PowerShell text 7-bit ASCII and avoids encoding-sensitive deployment issues.
 
-`buildIntuneVariables(policy, branding, urls)` generates a PowerShell variable block for Check's `Setup-Windows-Chrome-and-Edge.ps1` deployment script.
+### `buildGpoScript`
 
-The generated text is constrained for PowerShell deployment safety:
+`buildGpoScript(payload)` creates a ready-to-run Group Policy script for Chrome and Edge.
 
-- 7-bit ASCII only via `toAscii`
-- double quotes escaped through `powershellQuote`
-- arrays rendered through `powershellArray`
-- no shell chaining syntax
+It imports the `GroupPolicy` module, creates or updates a GPO, then writes all Chrome and Edge policy values using `Set-GPRegistryValue`.
 
-CIPP variables are blanked when CIPP reporting is disabled:
+The generated helper function `Set-CheckGpoRegistryValue` retries `UnauthorizedAccessException` briefly because a newly created GPO’s SYSVOL permissions may not be ready immediately.
+
+The script links to Check’s ADMX templates through `CHECK_ADMX_URL`:
 
 ```ts
-$cippServerUrl = ""
-$cippTenantId = ""
+export const CHECK_ADMX_URL =
+  "https://github.com/CyberDrain/Check/tree/v1.1.0/enterprise/admx";
 ```
 
-The output includes variables for:
+The templates are linked, not vendored.
 
-- CIPP reporting
-- custom rules URL
-- URL allowlist
-- webhook URL and events
-- branding
-- logo URL
-- domain squatting enabled flag
+### `buildRmmScript`
 
-## CIPP Fields
+`buildRmmScript(payload, firefoxFull)` creates a standalone endpoint deployment script intended to run as SYSTEM from an RMM.
 
-`buildCippFields(policy, branding, urls)` returns a simple field/value list for CIPP-oriented UI or copy workflows.
+It includes three browser toggles:
 
-It includes config URL, reporting status, CIPP server URL, tenant identifier, branding values, color, and logo URL.
-
-When `cippTenantId` is empty, the field value is:
-
-```text
-(auto-filled per CIPP tenant)
+```powershell
+$IncludeChrome = $true
+$IncludeEdge = $true
+$IncludeFirefox = $true
 ```
 
-## Firefox Policies
+For Chrome and Edge, it writes the same registry values used by `.reg` and GPO artifacts.
 
-`buildFirefoxFull(fragment)` wraps the Firefox managed-storage fragment into a complete `policies.json` shape.
+For Firefox, it embeds the full generated `policies.json` and writes it to each installed Firefox `distribution` directory. Existing `policies.json` files are backed up to `.bak`.
 
-It sets the Check Firefox extension as locked and force-installed:
+Firefox policy JSON is written with ASCII encoding because the generated text is already reduced to 7-bit ASCII and a BOM can break Firefox policy parsing.
+
+### `buildIntuneVariables`
+
+`buildIntuneVariables(policy, branding, urls)` renders a variable block for Check’s `Setup-Windows-Chrome-and-Edge.ps1`.
+
+It emits variables such as:
+
+- `$enableCippReporting`
+- `$cippServerUrl`
+- `$customRulesUrl`
+- `$urlAllowlist`
+- `$enableGenericWebhook`
+- `$webhookEvents`
+- `$companyName`
+- `$productName`
+- `$primaryColor`
+- `$logoUrl`
+- `$domainSquattingEnabled`
+
+The function uses `powershellQuote` and `powershellArray` so generated values can safely contain URLs, names, and patterns.
+
+## Firefox Artifacts
+
+Firefox uses two related outputs:
+
+- `firefox_fragment`
+- `firefox_policies_full`
+
+`firefox_fragment` contains only the managed `3rdparty` policy payload for the Check extension:
 
 ```ts
-FIREFOX_EXTENSION_ID = "check@cyberdrain.com"
+{
+  policies: {
+    "3rdparty": {
+      Extensions: {
+        [FIREFOX_EXTENSION_ID]: managedStorage,
+      },
+    },
+  },
+}
 ```
 
-The `install_url` is intentionally empty, matching the enterprise template where deployers provide their own XPI source.
+`buildFirefoxFull(fragment)` wraps that fragment in a complete Firefox `policies.json` structure with extension install settings.
 
-## Integration Points
+The Firefox extension ID is:
 
-Publishing connects to:
+```ts
+export const FIREFOX_EXTENSION_ID = "check@cyberdrain.com";
+```
 
-- `src/lib/db.ts` for IDs, timestamps, hashing, instance settings, and active snapshots
-- `src/lib/merge.ts` for `mergeRuleset`
-- `src/lib/validate.ts` for `validateDelta` and `validateRuleset`
-- `src/lib/audit.ts` for `writeAudit`
-- `src/routes/rules.ts` and `routes/api/rules.ts` for publish, preview, and ETag behavior
-- `src/lib/upstream.ts`, which also uses `loadSnapshotRuleset` and calls `publishTenant`
+The generated full policy intentionally leaves `install_url` blank, matching Check’s upstream template. Deployers must fill in the XPI source before enabling Firefox force-install.
 
-Artifacts connect to:
+## CIPP Fields and Warnings
 
-- `src/lib/db.ts` for instance settings and tenant branding types
-- `routes/api/artifacts.ts` through `generateArtifacts`
-- tests through `buildArtifactBundle`, which is the preferred target for golden artifact assertions
+`buildCippFields(policy, branding, urls)` produces a human-readable list of fields for CIPP deployment standards. It includes config URL, CIPP settings, tenant/domain value, branding fields, and logo URL.
 
-## Testing Guidance
+When CIPP reporting is enabled but `cippTenantId` is empty, `buildArtifactBundle` adds a warning. This is only a direct-deployment problem. CIPP deployment standards can fill the tenant ID per tenant, so the warning text explicitly says when it can be ignored.
 
-Use `buildArtifactBundle` for deterministic artifact tests because it has no database dependency. Tests can pass fixed `ArtifactInput` values and compare generated JSON, registry text, PowerShell variable blocks, and CIPP fields.
+## Connections to the Rest of the Codebase
 
-Use `generateArtifacts` tests when verifying database behavior, especially:
+Publishing is consumed by rules and upstream flows:
 
-- missing `public_base_url`
-- requested GUID lookup
-- latest active GUID selection
-- default branding fallback
-- policy JSON parsing
+- `routes/api/rules.ts` calls `publishTenant` and `buildMergedRuleset`.
+- `src/routes/rules.ts` calls `buildMergedRuleset` and `formatEtagHeader`.
+- `src/lib/upstream.ts` calls `loadSnapshotRuleset` and `republishAllTenants`.
+- `routes/api/instance.ts` calls `republishAllTenants` for baseline republish behavior.
+- Tests call `publishTenant` from `rules-endpoint.test.ts` and `upstream.test.ts`.
 
-For publishing, tests should exercise `publishTenant` when validating the full write path, including R2 writes, D1 version records, tenant current-version updates, and audit creation.
+Artifacts are consumed by the artifacts API and tests:
 
-Use `buildMergedRuleset` directly for dry-run and validation behavior, especially cases where:
+- `routes/api/artifacts.ts` calls `generateArtifacts`.
+- `test/artifacts.test.ts` calls `buildArtifactBundle`.
 
-- delta JSON is invalid
-- there is no active upstream snapshot
-- the active snapshot R2 object is missing
-- merged output fails `validateRuleset`
+The module depends on shared lower-level libraries:
+
+- `src/lib/db.ts` for D1 helpers, IDs, timestamps, and hashes.
+- `src/lib/merge.ts` for `applyDelta`, `mergeRuleset`, and `TenantDelta`.
+- `src/lib/validate.ts` for `validateDelta` and `validateRuleset`.
+- `src/lib/audit.ts` for publish audit events.
+- `src/lib/tenant-defaults.ts` for inherited tenant defaults.
 
 ## Contributor Notes
 
-Keep `buildMergedRuleset` as the single shared gate for publish-like behavior. Adding validation only inside `publishTenant` can create drift between real publishing, dry-run validation, and preview endpoints.
+Use `buildMergedRuleset` for any code path that needs to preview or publish a merged ruleset. It is the only path that consistently applies the active upstream snapshot, instance baseline delta, tenant delta, version metadata, and final ruleset validation.
 
-Keep `buildArtifactBundle` pure. Database lookups belong in `generateArtifacts`; rendering logic belongs in pure helpers so golden tests remain stable and cheap.
+Use `buildArtifactBundle` for tests and deterministic artifact rendering. It is pure and does not read D1 or R2.
 
-Be careful when changing registry or PowerShell rendering helpers. `buildRegFile` depends on `regEscape`, `regString`, `regDword`, and `regNumberedStrings` for deployment-safe output, while `buildIntuneVariables` depends on `toAscii`, `powershellQuote`, and `powershellArray`.
+When adding a new Chrome or Edge registry-backed policy value, add it to `registryWrites`. That automatically updates `.reg`, GPO, and RMM outputs together.
 
-Do not store generated artifacts unless the product requirements change. The current design intentionally renders artifacts from D1 state every time, while only published ruleset JSON is written to R2.
+When adding a new extension policy setting, update the full chain deliberately:
+
+- `ResolvedPolicy`
+- `resolvePolicy`
+- `buildManagedStorage`
+- browser-specific renderers if the setting needs registry/script output
+- `buildIntuneVariables` or `buildCippFields` if operators need it there
+- golden artifact tests, because output order and bytes are intentionally locked
+
+Do not store generated artifacts. The design of `artifacts.ts` assumes artifacts are always derived from current tenant, instance, policy, branding, and GUID state.

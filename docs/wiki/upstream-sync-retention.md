@@ -1,52 +1,59 @@
 <!-- GENERATED FILE, do not edit by hand.
-     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit dc26798.
+     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit 5adb17f.
      Regenerate: node .gitnexus/run.cjs wiki, then: npm run docs:wiki -->
 
 # Upstream Sync & Retention
 
-The Upstream Sync & Retention module keeps the instance-wide upstream ruleset current, snapshots every accepted or invalid upstream payload for traceability, republishes tenant rules when the upstream changes, and removes old operational data on the scheduled cleanup path.
+The Upstream Sync & Retention module keeps the application’s upstream ruleset current, stores every meaningful fetch as a snapshot, republishes tenant outputs when the upstream source changes, and removes old operational data on the scheduled cleanup path.
 
-It is implemented across:
+It is implemented primarily in:
 
-- `src/lib/upstream.ts`: upstream fetch, validation, snapshotting, diff summaries, tenant republishing, snapshot pruning.
-- `src/lib/cron.ts`: daily scheduled orchestration and retention cleanup.
+- `src/lib/upstream.ts`: upstream fetch, validation, snapshot storage, diffing, tenant republish, snapshot pruning
+- `src/lib/cron.ts`: scheduled orchestration and broader retention cleanup
 
-## Runtime Flow
+The module is used by the scheduled Worker handler through `runScheduledTasks()`, by API routes that trigger upstream sync manually, and by tests/helpers that seed upstream state.
+
+## Responsibilities
+
+This module owns four related behaviors:
+
+1. Fetch the configured upstream ruleset from `instance_settings.upstream_source_url`.
+2. Validate and snapshot fetched upstream JSON.
+3. Promote valid changed snapshots to active status and republish affected tenant outputs.
+4. Prune old snapshots, metrics, revoked GUID hit records, and webhook events according to instance settings.
+
+The sync path is deliberately conservative: validation failures are stored for forensics but never replace the active snapshot.
+
+## Scheduled Flow
 
 ```mermaid
 flowchart TD
-  A[scheduled in src/index.ts] --> B[runScheduledTasks]
+  A[scheduled handler] --> B[runScheduledTasks]
   B --> C[syncUpstream]
   C --> D[validateRuleset]
   C --> E[upstream_snapshots + R2]
-  C --> F[publishTenant for current tenants]
+  C --> F[republishAllTenants]
   B --> G[runRetentionCleanup]
   G --> H[pruneSnapshots]
-  G --> I[metrics/webhook cleanup]
 ```
 
-`runScheduledTasks(env, fetcher)` is the scheduled entry point. It runs `syncUpstream(env, "cron", fetcher)` first, then `runRetentionCleanup(env)`. This ordering means tenant publications are updated against the newest valid upstream snapshot before old metrics, webhook events, and snapshots are removed.
+`runScheduledTasks(env, fetcher)` is the scheduled entry point in `src/lib/cron.ts`. It always performs upstream sync first, then retention cleanup:
 
-## Upstream Synchronization
+```ts
+const sync = await syncUpstream(env, "cron", fetcher);
+const cleanup = await runRetentionCleanup(env);
+return { sync, cleanup };
+```
 
-`syncUpstream(env, operator, fetcher = fetch)` performs the full upstream refresh cycle:
+The returned object contains both the upstream sync result and cleanup counts:
 
-1. Reads instance settings with `getInstanceSettings(env.DB)`.
-2. Fetches `settings.upstream_source_url` with `accept: application/json`.
-3. Hashes the response body with `sha256Hex(body)`.
-4. Compares the hash to `getActiveSnapshot(env.DB)`.
-5. Validates changed content with `validateRuleset(body)`.
-6. Writes the payload to R2 using a key shaped as `upstream/{timestamp}-{hashPrefix}.json`.
-7. Inserts a row into `upstream_snapshots`.
-8. Supersedes the prior active snapshot when a new valid snapshot is accepted.
-9. Republishes every tenant that has `current_version_id` set.
-10. Writes audit records through `writeAudit`.
+```ts
+Promise<{ sync: SyncOutcome; cleanup: CleanupSummary }>
+```
 
-The optional `fetcher` parameter makes the function testable without using the global `fetch`.
+## Sync Outcomes
 
-## `SyncOutcome`
-
-`syncUpstream` returns a `SyncOutcome`:
+`syncUpstream()` returns a `SyncOutcome` describing the result:
 
 ```ts
 export interface SyncOutcome {
@@ -59,129 +66,210 @@ export interface SyncOutcome {
 }
 ```
 
-Status meanings:
+The four statuses mean:
 
-- `unchanged`: the fetched body hash matches the active snapshot hash. No new snapshot is written.
-- `updated`: validation passed, a new active snapshot was stored, the previous active snapshot was marked `superseded`, and tenant republishing was attempted.
-- `failed_validation`: the fetched body changed but failed `validateRuleset`. The invalid body is stored in R2 and recorded in `upstream_snapshots` as `failed_validation`, but it does not replace the active snapshot.
-- `fetch_error`: the upstream request failed or returned a non-OK HTTP status. No snapshot is stored.
+- `unchanged`: fetched content hash matches the current active snapshot
+- `updated`: fetched content is valid, changed, stored, promoted active, and tenant republish was attempted
+- `failed_validation`: fetched content was stored for review but not activated
+- `fetch_error`: upstream could not be fetched or returned a non-OK HTTP status
 
-## Snapshot Storage
+## `syncUpstream()`
 
-Valid and invalid changed upstream payloads are written to `env.STORAGE` with JSON content metadata:
+`syncUpstream(env, operator, fetcher = fetch)` is the core upstream synchronization function.
+
+It depends on:
+
+- `getInstanceSettings()` for `upstream_source_url`
+- `sha256Hex()` for body hashing
+- `getActiveSnapshot()` for current active snapshot lookup
+- `validateRuleset()` for ruleset validation
+- `loadSnapshotRuleset()` to load the previous active ruleset for diffing
+- `republishAllTenants()` to regenerate tenant outputs after activation
+- `writeAudit()` for audit trail entries
+- `newId()` and `nowIso()` for snapshot metadata
+
+### Fetch Handling
+
+The upstream URL comes from instance settings:
 
 ```ts
-httpMetadata: { contentType: "application/json; charset=utf-8" }
+const settings = await getInstanceSettings(env.DB);
+const url = settings.upstream_source_url;
 ```
 
-Valid snapshots insert an `upstream_snapshots` row with:
+The fetch request asks for JSON:
 
-- `status = 'active'`
-- `upstream_version` set from `ruleset.version` when it is a string
-- `diff_summary` from `computeDiffSummary`
-
-When there is an existing active snapshot, `syncUpstream` batches the new insert with:
-
-```sql
-UPDATE upstream_snapshots SET status = 'superseded' WHERE id = ?
+```ts
+const response = await fetcher(url, {
+  headers: { accept: "application/json" },
+});
 ```
 
-Validation failures insert an `upstream_snapshots` row with:
+If the response is not OK, `syncUpstream()` returns `fetch_error` and writes an `upstream.sync` audit event. Thrown fetch errors are also converted into `fetch_error`, with the error message included in `errors`.
 
-- `status = 'failed_validation'`
-- `upstream_version = null`
-- `diff_summary = 'validation failed: ...'`
+### Hash-Based No-Change Detection
 
-This preserves bad upstream payloads for forensics while keeping the previous active snapshot intact.
+After a successful fetch, the raw response body is hashed:
+
+```ts
+const hash = await sha256Hex(body);
+const active = await getActiveSnapshot(env.DB);
+```
+
+If the active snapshot has the same hash, the sync does not validate, store, or republish anything. It returns:
+
+```ts
+{ status: "unchanged", snapshotId: active.id }
+```
+
+An audit record is still written for visibility.
+
+### Snapshot Key Format
+
+Changed fetches receive a new snapshot id and R2 object key:
+
+```ts
+const fetchedAt = nowIso();
+const snapshotId = newId();
+const r2Key = `upstream/${fetchedAt.replace(/[:.]/g, "-")}-${hash.slice(0, 12)}.json`;
+```
+
+The key includes the fetch timestamp and first 12 hash characters, which makes stored objects sortable by time and easy to correlate with database rows.
+
+### Validation Failure Path
+
+`validateRuleset(body)` validates the raw upstream JSON before activation.
+
+When validation fails:
+
+1. The raw body is stored in R2.
+2. A row is inserted into `upstream_snapshots` with `status = 'failed_validation'`.
+3. The active snapshot is left untouched.
+4. An `upstream.sync` audit event is written with a capped error list.
+5. `syncUpstream()` returns `failed_validation`.
+
+The database row stores a truncated diagnostic summary in `diff_summary`:
+
+```ts
+`validation failed: ${validation.errors.slice(0, 5).join("; ")}`
+```
+
+This path is important because bad upstream data remains available for investigation without affecting tenant publishing.
+
+### Successful Activation Path
+
+For valid changed rulesets, `syncUpstream()`:
+
+1. Parses the validated ruleset from `validation.ruleset`.
+2. Loads the previous active ruleset with `loadSnapshotRuleset(env, active)` when one exists.
+3. Builds a human-readable diff with `computeDiffSummary(previousRuleset, ruleset)`.
+4. Stores the raw body in R2.
+5. Inserts a new `upstream_snapshots` row with `status = 'active'`.
+6. Marks the previous active snapshot as `superseded`.
+7. Calls `republishAllTenants()`.
+
+The insert and previous-active update are executed together through `env.DB.batch(statements)`.
+
+Only string `ruleset.version` values are stored as `upstream_version`; non-string versions are stored as `null`:
+
+```ts
+typeof ruleset.version === "string" ? ruleset.version : null
+```
+
+### Tenant Republishing
+
+After a valid snapshot becomes active, the module republishes every tenant that already has a published version:
+
+```ts
+await republishAllTenants(
+  env,
+  "cron",
+  `upstream auto-publish of snapshot ${snapshotId}`,
+  operator,
+);
+```
+
+The surrounding comment documents an important publishing invariant: republish uses the delta frozen in the tenant’s published version, not the operator’s current draft.
+
+The final `updated` outcome includes:
+
+- `snapshotId`
+- `diffSummary`
+- `republished`
+- `republishFailures`
+
+The audit record stores the failure count, not the full failure objects:
+
+```ts
+republishFailures: republishFailures.length
+```
 
 ## Diff Summaries
 
-`computeDiffSummary(previous, next)` produces a human-readable one-line description of the structural change between snapshots.
+`computeDiffSummary(previous, next)` produces a compact, human-readable description of what changed between two upstream rulesets.
+
+For the first valid snapshot, it returns:
+
+```ts
+initial snapshot, version ${String(next.version ?? "unknown")}
+```
+
+For later snapshots, it compares selected high-value sections instead of dumping a full structural diff.
 
 It reports:
 
-- Initial snapshot version when `previous === null`.
-- Version changes via `previous.version !== next.version`.
-- `phishing_indicators` additions, removals, and changes by string `id`.
-- `trusted_login_patterns` additions and removals.
-- `exclusion_system.domain_patterns` additions and removals.
-- Added or removed top-level sections.
+- version changes
+- `phishing_indicators` additions, removals, and changed entries by `id`
+- `trusted_login_patterns` additions/removals
+- `exclusion_system.domain_patterns` additions/removals
+- top-level sections added or removed
 
-If no tracked differences are found, it returns:
+If no tracked structural changes are found, it returns:
 
-```text
+```ts
 no structural changes
 ```
 
-`phishing_indicators` comparison uses an internal `indexById` helper that maps each object with a string `id` to `JSON.stringify(item)`. That means changes are detected at the serialized object level for matching IDs.
+### `phishing_indicators` Comparison
 
-`summarizeStringArray(label, previous, next)` is the shared helper for array-like sections. It coerces array items with `String(...)`, compares them as sets, and returns strings such as:
-
-```text
-trusted_login_patterns +2 -1
-```
-
-It returns `null` when there are no additions or removals.
-
-## Tenant Republishing
-
-After accepting a valid new upstream snapshot, `syncUpstream` republishes every tenant with a current published version:
-
-```sql
-SELECT t.id AS tenant_id, v.delta_json
-FROM tenants t
-JOIN ruleset_versions v ON v.id = t.current_version_id
-```
-
-Each tenant is republished with:
+`computeDiffSummary()` indexes indicator arrays by each object’s string `id`:
 
 ```ts
-publishTenant(
-  env,
-  row.tenant_id,
-  row.delta_json,
-  "cron",
-  `upstream auto-publish of snapshot ${snapshotId}`,
-)
+const indexById = (value: unknown): Map<string, string> => { ... }
 ```
 
-The important behavior is that republishing uses `delta_json` from the tenant’s current published version. It does not use an operator draft. This preserves tenant-specific deltas while re-merging them against the newly active upstream ruleset.
+Each item is serialized with `JSON.stringify(item)`. If the same `id` exists in both snapshots but the serialized object differs, it counts as changed:
 
-Successful tenant republishes increment `republished`. Failed republishes are collected in `republishFailures`, and each failure writes a `rules.publish_failed` audit event with the tenant ID, snapshot ID, and errors.
+```ts
+indicators +${added} -${removed} ~${changed}
+```
 
-The final `upstream.sync` audit event records the update status, snapshot ID, diff summary, republished count, and failure count.
+This makes the summary sensitive to any object-level change for a known indicator id.
 
-## Audit Behavior
+### String Array Comparison
 
-`syncUpstream` writes audit records for all terminal outcomes:
+The private helper `summarizeStringArray(label, previous, next)` compares array-like sections as sets of strings.
 
-- Fetch HTTP failure: `upstream.sync` with `status: "fetch_error"`.
-- Fetch exception: `upstream.sync` with the exception message.
-- Unchanged hash: `upstream.sync` with `status: "unchanged"` and active `snapshotId`.
-- Validation failure: `upstream.sync` with `status: "failed_validation"`, `snapshotId`, and up to 10 validation errors.
-- Successful update: `upstream.sync` with `status: "updated"`, `snapshotId`, `diffSummary`, `republished`, and `republishFailures` count.
-- Tenant republish failure: `rules.publish_failed` for the affected tenant.
+It is used for:
 
-`operator` is passed through to `writeAudit`. Scheduled work passes `"cron"`.
+- `trusted_login_patterns`
+- `exclusion_system.domain_patterns`
+
+The output format is:
+
+```ts
+${label} +${added} -${removed}
+```
+
+The helper ignores duplicate array entries because it compares through `Set`.
 
 ## Retention Cleanup
 
-`runRetentionCleanup(env)` removes old operational data according to instance settings:
+Retention cleanup lives in `src/lib/cron.ts`.
 
-```ts
-const metricsDays = Number(settings.metrics_retention_days) || 7;
-const webhookDays = Number(settings.webhook_retention_days) || 90;
-const keepSnapshots = Number(settings.upstream_keep_snapshots) || 10;
-```
+`runRetentionCleanup(env)` deletes old operational records and calls `pruneSnapshots()` for upstream snapshot retention.
 
-It deletes:
-
-- `fetch_metrics` rows where `day < metricsCutoffDay`.
-- `revoked_guid_hits` rows where `day < metricsCutoffDay`.
-- `webhook_events` rows where `status != 'new' OR received_at < webhookCutoff`.
-- Old upstream snapshots via `pruneSnapshots(env, keepSnapshots)`.
-
-It returns a `CleanupSummary`:
+It returns:
 
 ```ts
 export interface CleanupSummary {
@@ -192,59 +280,137 @@ export interface CleanupSummary {
 }
 ```
 
-Database deletion counts come from `result.meta.changes ?? 0`.
+Retention settings come from `getInstanceSettings(env.DB)`:
+
+```ts
+const metricsDays = Number(settings.metrics_retention_days) || 7;
+const webhookDays = Number(settings.webhook_retention_days) || 90;
+const keepSnapshots = Number(settings.upstream_keep_snapshots) || 10;
+```
+
+Defaults are applied when settings are missing or not numeric:
+
+- metrics retention: 7 days
+- webhook retention: 90 days
+- upstream snapshots retained: 10 newest snapshots, plus active snapshot protection
+
+### Metrics and Revoked GUID Hits
+
+Metrics and revoked GUID hits are pruned by day:
+
+```ts
+DELETE FROM fetch_metrics WHERE day < ?
+DELETE FROM revoked_guid_hits WHERE day < ?
+```
+
+The cutoff format is `YYYY-MM-DD`, derived from the configured metrics retention window.
+
+### Webhook Events
+
+Webhook events are deleted when either condition is true:
+
+```sql
+status != 'new' OR received_at < ?
+```
+
+That means dispositioned events are removed regardless of age, while still-new events are retained until they pass the webhook retention cutoff.
 
 ## Snapshot Pruning
 
-`pruneSnapshots(env, keep)` keeps the newest `keep` snapshot rows plus the active snapshot, regardless of where the active snapshot appears in the ordered list.
+`pruneSnapshots(env, keep)` keeps the newest `keep` rows from `upstream_snapshots`, regardless of status, and also protects any active snapshot outside that newest window.
 
-It loads snapshots newest-first:
+It queries snapshots newest first:
 
-```sql
-SELECT id, r2_key, status
-FROM upstream_snapshots
-ORDER BY fetched_at DESC
+```ts
+SELECT id, r2_key, status FROM upstream_snapshots ORDER BY fetched_at DESC
 ```
 
-Then it computes:
+Then computes removable rows:
 
 ```ts
 const excess = results.slice(keep).filter((row) => row.status !== "active");
 ```
 
-Each excess snapshot is deleted from R2 first with `env.STORAGE.delete(row.r2_key)`, then removed from `upstream_snapshots`.
+For each removable snapshot, it deletes the R2 object first, then deletes the database row:
 
-The function returns the number of deleted snapshot rows.
+```ts
+await env.STORAGE.delete(row.r2_key);
+await env.DB.prepare("DELETE FROM upstream_snapshots WHERE id = ?")
+  .bind(row.id)
+  .run();
+```
+
+The return value is the number of snapshots removed.
+
+Because active snapshots are filtered out of the deletion set, an old active row is retained even if it falls outside the newest `keep` rows.
+
+## Audit Behavior
+
+`syncUpstream()` writes `upstream.sync` audit records for every terminal sync result:
+
+- fetch error
+- unchanged
+- failed validation
+- updated
+
+The audit payload is intentionally bounded on noisy paths. Validation failures include only the first 10 validation errors in the audit record, while the returned `SyncOutcome` includes the full `validation.errors` array.
+
+Updated syncs audit the diff summary, republish count, and number of republish failures.
 
 ## Integration Points
 
-Incoming production flow:
+### Scheduled Worker
 
-- `scheduled` in `src/index.ts` calls `runScheduledTasks`.
+The scheduled Worker entry point calls `runScheduledTasks()`:
 
-Incoming API flow:
+```ts
+scheduled (src/index.ts) -> runScheduledTasks()
+```
 
-- `routes/api/upstream.ts` calls `syncUpstream`, allowing upstream sync outside the scheduled path.
+This is the normal production path for daily upstream sync and retention cleanup.
 
-Test and fixture flow:
+### API Route
 
-- `test/upstream.test.ts` covers `syncUpstream` and `pruneSnapshots`.
-- `test/cron.test.ts` covers `runScheduledTasks` and `runRetentionCleanup`.
-- `seedUpstream` in `test/helpers.ts` uses `syncUpstream` to prepare test state.
+`routes/api/upstream.ts` calls `syncUpstream()` directly. This allows upstream sync to be triggered outside the scheduled path while still using the same validation, snapshot, activation, republish, and audit logic.
 
-Outgoing dependencies:
+### Publishing
 
-- `getInstanceSettings`, `getActiveSnapshot`, `newId`, `nowIso`, and `sha256Hex` from `src/lib/db.ts`.
-- `loadSnapshotRuleset` and `publishTenant` from `src/lib/publish.ts`.
-- `validateRuleset` from `src/lib/validate.ts`.
-- `writeAudit` from `src/lib/audit.ts`.
+`syncUpstream()` delegates tenant output regeneration to `republishAllTenants()` from `src/lib/publish.ts`. The upstream module does not perform tenant merge logic itself; it only activates the new upstream snapshot and asks publishing code to regenerate affected tenant outputs.
 
-## Development Notes
+### Storage and Database
 
-Keep the validation boundary strict: invalid upstream content should be stored for investigation but must not become active.
+The module uses both configured environment bindings:
 
-When changing `computeDiffSummary`, preserve its role as a concise operator-facing summary. It should highlight meaningful structural changes without becoming a full diff engine.
+- `env.DB` for settings, snapshot metadata, audit records, metrics cleanup, revoked GUID cleanup, and webhook cleanup
+- `env.STORAGE` for raw upstream snapshot JSON in R2
 
-When changing tenant republishing, preserve the current-version behavior: `syncUpstream` republishes from `ruleset_versions.delta_json` for `tenants.current_version_id`, not from mutable drafts.
+The database row and R2 object are linked by `upstream_snapshots.r2_key`.
 
-When changing retention logic, keep `pruneSnapshots` active-safe. The active snapshot must survive even if it falls outside the newest `keep` rows.
+## Failure Semantics
+
+The module separates fetch, validation, activation, and republish concerns clearly:
+
+- Fetch failures do not create snapshots.
+- Validation failures create forensic snapshots but do not activate them.
+- Unchanged hashes do not revalidate or republish.
+- Valid changed snapshots are activated before tenant republish starts.
+- Republish failures are reported in `SyncOutcome.republishFailures`; they do not roll back the active upstream snapshot.
+
+This means a valid upstream update can become active even if one or more tenant republish attempts fail. Downstream callers should inspect `republishFailures` when they need to surface partial publishing problems.
+
+## Testing Surface
+
+The main test-facing functions are:
+
+- `syncUpstream()` in `test/upstream.test.ts`
+- `pruneSnapshots()` in `test/upstream.test.ts`
+- `runRetentionCleanup()` in `test/cron.test.ts`
+- `runScheduledTasks()` in `test/cron.test.ts`
+
+`syncUpstream()` accepts an injectable `fetcher`, which keeps tests deterministic and avoids relying on global network behavior:
+
+```ts
+syncUpstream(env, operator, fetcher)
+```
+
+`runScheduledTasks()` also accepts the same injectable fetcher and passes it through to `syncUpstream()`.

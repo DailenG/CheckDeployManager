@@ -1,168 +1,69 @@
 <!-- GENERATED FILE, do not edit by hand.
-     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit dc26798.
+     Mirrored from .gitnexus/wiki (GitNexus knowledge graph wiki), source commit 5adb17f.
      Regenerate: node .gitnexus/run.cjs wiki, then: npm run docs:wiki -->
 
 # Public Rules Delivery
 
-`src/routes/rules.ts` defines unauthenticated runtime delivery endpoints for published rulesets, draft previews, and tenant logos. Access control is based on unguessable GUIDs or preview tokens rather than authenticated sessions, and misses intentionally return the same empty `404` response through `bare404()`.
+`src/routes/rules.ts` defines the unauthenticated runtime delivery surface for published rulesets, preview rulesets, and tenant logos.
 
-## Routes
+The module exports `rulesRoutes`, a Hono router mounted elsewhere in the application. It intentionally does not perform user authentication. Access control is based on unguessable GUIDs or preview tokens, and all lookup failures return the same bare `404` response to avoid leaking whether an identifier is unknown, revoked, inactive, or missing backing storage.
 
-### `OPTIONS /rules/:file`
+## Public Endpoints
 
-Returns `204` with shared CORS headers:
+This module owns three public route families:
 
-```http
-Access-Control-Allow-Origin: *
-Access-Control-Allow-Methods: GET, HEAD, OPTIONS
-```
+- `GET|HEAD /rules/:file`
+- `OPTIONS /rules/:file`
+- `GET /preview/:file`
+- `GET /assets/:guid/logo`
 
-This supports browser clients fetching public rules JSON.
+Expected file-style routes require a `.json` suffix:
 
-### `GET|HEAD /rules/:guid.json`
+- `/rules/{guid}.json`
+- `/preview/{token}.json`
 
-Serves the current published ruleset for an active GUID.
+Requests without the `.json` suffix receive `404`.
 
-Flow:
+## Design Goals
+
+The module is optimized for public runtime delivery:
+
+- No auth middleware on these routes.
+- Unguessable identifiers are the access boundary.
+- Unknown, inactive, revoked, and missing resources mostly collapse to a uniform bare `404`.
+- Published rulesets are cacheable for short periods.
+- Preview responses are never cached.
+- Runtime fetches are counted for telemetry.
+- Revoked GUID hits are counted separately.
+- Content is served with `X-Content-Type-Options: nosniff`.
+
+## Route Architecture
 
 ```mermaid
 flowchart TD
-  A["/rules/:guid.json"] --> B["validate .json suffix"]
-  B --> C["getGuid(DB, guid)"]
-  C --> D{"active?"}
-  D -- no --> E["countRevokedHit? + bare404()"]
-  D -- yes --> F["getCurrentVersion(DB, tenant_id)"]
-  F --> G{"If-None-Match matches?"}
-  G -- yes --> H["countFetchHit(..., true) + 304"]
-  G -- no --> I["countFetchHit(..., false)"]
-  I --> J{"HEAD?"}
-  J -- yes --> K["200 headers only"]
-  J -- no --> L["STORAGE.get(version.r2_key)"]
-  L --> M["200 JSON body"]
+  A[rulesRoutes] --> B["/rules/:file"]
+  A --> C["/preview/:file"]
+  A --> D["/assets/:guid/logo"]
+
+  B --> E[getGuid]
+  B --> F[getCurrentVersion]
+  B --> G[STORAGE.get]
+  B --> H[countFetchHit]
+
+  C --> I[getDraftDelta]
+  C --> J[buildMergedRuleset]
+
+  D --> K[getGuid]
+  D --> L[tenant_branding]
+  D --> M[instance_settings]
+  D --> N[STORAGE.get]
 ```
 
-Important behavior:
-
-- `file` must end with `.json`; otherwise the route returns `bare404()`.
-- The GUID is the filename without the `.json` suffix.
-- `getGuid(c.env.DB, guid)` is the first lookup for both unknown and revoked GUIDs. This keeps unknown and revoked probes closer in timing.
-- Non-active GUIDs call `countRevokedHit(c.env.DB, guid)` and still return `bare404()`.
-- Active GUIDs resolve the tenant’s current published version with `getCurrentVersion(c.env.DB, guidRow.tenant_id)`.
-- `If-None-Match` is honored. The route splits comma-separated values, trims whitespace, strips a leading `W/`, and compares against `formatEtagHeader(version.etag)`.
-- Cache hits are recorded with `countFetchHit(..., true)` before returning `304`.
-- Normal fetches are recorded with `countFetchHit(..., false)`.
-- `HEAD` returns headers only and does not read the R2 object body.
-- `GET` reads the published artifact from `c.env.STORAGE.get(version.r2_key)` and streams `object.body`.
-
-Responses use `rulesHeaders(version.etag)`, which sets:
-
-```http
-Content-Type: application/json; charset=utf-8
-Cache-Control: public, max-age=300
-ETag: <formatted etag>
-X-Content-Type-Options: nosniff
-Access-Control-Allow-Origin: *
-Access-Control-Allow-Methods: GET, HEAD, OPTIONS
-```
-
-### `GET /preview/:token.json`
-
-Builds and returns a no-store preview ruleset for a tenant draft.
-
-Flow:
-
-1. Validates the `.json` suffix.
-2. Extracts the preview token from the filename.
-3. Looks up the tenant directly:
-
-```sql
-SELECT id FROM tenants WHERE preview_token = ?
-```
-
-4. Loads the draft delta with `getDraftDelta(c.env.DB, tenant.id)`.
-5. Reads the latest published version number:
-
-```sql
-SELECT MAX(version_number) AS max_version
-FROM ruleset_versions
-WHERE tenant_id = ?
-```
-
-6. Calls `buildMergedRuleset(c.env, draft, nextVersionNumber)`.
-
-If `buildMergedRuleset()` fails, the route returns:
-
-```http
-422 Unprocessable Entity
-Cache-Control: no-store
-```
-
-with a JSON body:
-
-```json
-{
-  "errors": []
-}
-```
-
-If the build succeeds, the route returns the merged ruleset as JSON with:
-
-```http
-Cache-Control: no-store
-X-Content-Type-Options: nosniff
-Access-Control-Allow-Origin: *
-Access-Control-Allow-Methods: GET, HEAD, OPTIONS
-```
-
-Preview output is generated dynamically and is not served from the published R2 object referenced by `ruleset_versions.r2_key`.
-
-### `GET /assets/:guid/logo`
-
-Serves the active tenant’s logo asset.
-
-Flow:
-
-1. Resolves the GUID with `getGuid(c.env.DB, guid)`.
-2. Requires `guidRow.status === "active"`.
-3. Loads tenant branding:
-
-```sql
-SELECT logo_r2_key, logo_content_type
-FROM tenant_branding
-WHERE tenant_id = ?
-```
-
-4. Returns `bare404()` if no branding row exists, no logo key is set, or the R2 object is missing.
-5. Streams the logo from `c.env.STORAGE.get(branding.logo_r2_key)`.
-
-Logo responses use:
-
-```http
-Content-Type: <logo_content_type or application/octet-stream>
-Cache-Control: public, max-age=86400
-X-Content-Type-Options: nosniff
-Access-Control-Allow-Origin: *
-Access-Control-Allow-Methods: GET, HEAD, OPTIONS
-```
-
-## Key Components
-
-### `rulesRoutes`
-
-`rulesRoutes` is the exported Hono router:
-
-```ts
-export const rulesRoutes = new Hono<{ Bindings: Env }>();
-```
-
-It depends on the Worker `Env` binding type from `../types`. The route handlers use:
-
-- `c.env.DB` for D1 queries and helper calls.
-- `c.env.STORAGE` for published ruleset and logo objects.
-
-This module has no incoming calls in the provided call graph; it is intended to be mounted by the application’s route composition layer.
+## Shared Helpers
 
 ### `bare404()`
+
+Returns an empty `404` response:
 
 ```ts
 function bare404(): Response {
@@ -170,48 +71,317 @@ function bare404(): Response {
 }
 ```
 
-`bare404()` standardizes all public misses as empty `404` responses. The module uses it for:
-
-- Invalid filenames.
-- Unknown GUIDs.
-- Revoked or inactive GUIDs.
-- Missing current versions.
-- Missing R2 objects.
-- Unknown preview tokens.
-- Missing branding/logo assets.
-
-This is part of the public delivery security model: clients should not be able to distinguish unknown, revoked, unpublished, or missing-resource states from response body content.
+This is used deliberately across public routes to avoid exposing details about failed lookups. Most invalid states do not return JSON errors, explanatory text, or different status codes.
 
 ### `rulesHeaders(etagHash)`
 
-Builds the shared response headers for published rules JSON. It formats the raw version hash through `formatEtagHeader(etagHash)` from `src/lib/publish.ts`.
+Builds the standard response headers for published ruleset JSON:
 
-Use this helper for published ruleset responses so JSON content type, public cache policy, ETag formatting, CORS, and `nosniff` stay consistent.
+```ts
+function rulesHeaders(etagHash: string): Headers
+```
 
-## Codebase Connections
+It sets:
 
-This module is a thin delivery layer over database and publishing helpers:
+- `Access-Control-Allow-Origin: *`
+- `Access-Control-Allow-Methods: GET, HEAD, OPTIONS`
+- `Content-Type: application/json; charset=utf-8`
+- `Cache-Control: public, max-age=300`
+- `ETag: formatEtagHeader(etagHash)`
+- `X-Content-Type-Options: nosniff`
 
-- `getGuid()` resolves public GUIDs to tenant records and status.
-- `getCurrentVersion()` finds the current published ruleset version for a tenant.
-- `countFetchHit()` records ruleset delivery metrics, including conditional `304` hits.
-- `countRevokedHit()` records access attempts against revoked/non-active GUIDs.
-- `getDraftDelta()` loads tenant draft state for preview generation.
-- `buildMergedRuleset()` validates and merges a draft into a complete ruleset.
-- `formatEtagHeader()` centralizes ETag string formatting.
-- `c.env.STORAGE.get()` retrieves immutable published ruleset/logo objects by R2 key.
+The ETag formatting is delegated to `formatEtagHeader` from `src/lib/publish.ts`, keeping ETag syntax consistent with the publish path.
 
-The published `/rules/:guid.json` path is optimized around already-built artifacts in storage. The preview path is intentionally different: it rebuilds from draft state on demand, marks the response `no-store`, and returns validation errors directly to the caller.
+## Published Ruleset Delivery
+
+### `OPTIONS /rules/:file`
+
+The preflight route returns `204` with the shared CORS headers:
+
+```ts
+rulesRoutes.options("/rules/:file", () => {
+  return new Response(null, { status: 204, headers: CORS_HEADERS });
+});
+```
+
+Only the `/rules` route has an explicit `OPTIONS` handler in this module.
+
+### `GET|HEAD /rules/:file`
+
+The main runtime delivery route serves the current published ruleset for a GUID.
+
+High-level flow:
+
+1. Validate that `:file` ends with `.json`.
+2. Strip the suffix to get the GUID.
+3. Look up the GUID with `getGuid`.
+4. Return bare `404` for unknown GUIDs.
+5. If the GUID exists but is not `active`, call `countRevokedHit` and return bare `404`.
+6. Load the tenant's current published version with `getCurrentVersion`.
+7. Return bare `404` if there is no current version.
+8. Evaluate `If-None-Match` against the current version ETag.
+9. Count the request with `countFetchHit`.
+10. Return `304`, `200 HEAD`, or stream the ruleset object from `STORAGE`.
+
+The route intentionally performs a single indexed GUID lookup for both unknown and revoked identifiers:
+
+```ts
+const guidRow = await getGuid(c.env.DB, guid);
+if (guidRow === null) return bare404();
+if (guidRow.status !== "active") {
+  await countRevokedHit(c.env.DB, guid);
+  return bare404();
+}
+```
+
+That pattern avoids making enumeration probes distinguish unknown GUIDs from revoked GUIDs by route shape or response body. Revoked hits are still recorded through `countRevokedHit`.
+
+### Current Version Lookup
+
+After resolving an active GUID, the route loads the tenant's current published ruleset version:
+
+```ts
+const version = await getCurrentVersion(c.env.DB, guidRow.tenant_id);
+if (version === null) return bare404();
+```
+
+`getCurrentVersion` comes from `src/lib/db.ts`. The returned version is expected to provide at least:
+
+- `etag`
+- `r2_key`
+
+The `etag` is used for conditional requests. The `r2_key` is used to read the published JSON body from the configured storage binding.
+
+### Conditional Requests
+
+The route supports `If-None-Match` and returns `304` when the request already has the current version.
+
+```ts
+const etagHeader = formatEtagHeader(version.etag);
+const ifNoneMatch = c.req.header("If-None-Match");
+if (
+  ifNoneMatch !== undefined &&
+  ifNoneMatch
+    .split(",")
+    .map((v) => v.trim().replace(/^W\//, ""))
+    .includes(etagHeader)
+) {
+  await countFetchHit(c.env.DB, guidRow.tenant_id, guid, true);
+  return new Response(null, { status: 304, headers });
+}
+```
+
+Important details:
+
+- Multiple ETags are supported by splitting on commas.
+- Weak ETag prefixes are normalized by removing `W/`.
+- A `304` response is still counted as a fetch hit.
+- The final argument to `countFetchHit` is `true` for a cache hit and `false` for a full response.
+
+### `HEAD` Requests
+
+For `HEAD`, the route performs the same validation, GUID lookup, version lookup, ETag handling, and fetch counting as `GET`.
+
+If the request is not satisfied by `304`, it returns headers without fetching or streaming the R2 object body:
+
+```ts
+if (c.req.method === "HEAD") {
+  return new Response(null, { status: 200, headers });
+}
+```
+
+This keeps `HEAD` useful for cache validation and existence checks while avoiding unnecessary object reads.
+
+### Object Fetch
+
+For `GET`, the route reads the published object from `c.env.STORAGE`:
+
+```ts
+const object = await c.env.STORAGE.get(version.r2_key);
+if (object === null) return bare404();
+return new Response(object.body, { status: 200, headers });
+```
+
+If the database points to a missing object, the route still returns the same bare `404` shape used for other misses.
+
+## Preview Ruleset Delivery
+
+### `GET /preview/:file`
+
+The preview route builds and returns a merged draft ruleset for a tenant preview token.
+
+Flow:
+
+1. Validate `.json` suffix.
+2. Strip the suffix to get the preview token.
+3. Look up the tenant by `tenants.preview_token`.
+4. Return bare `404` if no tenant matches.
+5. Load the draft delta with `getDraftDelta`.
+6. Query the tenant's highest published `version_number`.
+7. Call `buildMergedRuleset`.
+8. Return validation errors as `422`.
+9. Return the merged draft ruleset as JSON with `Cache-Control: no-store`.
+
+The tenant lookup is performed inline:
+
+```ts
+const tenant = await c.env.DB.prepare(
+  "SELECT id FROM tenants WHERE preview_token = ?",
+)
+  .bind(token)
+  .first<{ id: string }>();
+```
+
+The draft delta comes from `getDraftDelta(c.env.DB, tenant.id)`. The preview version number passed into `buildMergedRuleset` is one greater than the tenant's highest published version:
+
+```ts
+(lastVersion?.max_version ?? 0) + 1
+```
+
+This lets preview builds use the same merge/build logic as publishing without persisting a new published version.
+
+### Preview Errors
+
+If `buildMergedRuleset` fails, the route returns JSON validation errors:
+
+```ts
+return c.json(
+  { errors: built.errors },
+  422,
+  { "Cache-Control": "no-store", ...CORS_HEADERS },
+);
+```
+
+Unlike most public misses, build failures are explicit because the preview endpoint is intended for draft validation and authoring feedback.
+
+### Preview Success
+
+Successful previews return the merged ruleset object:
+
+```ts
+return c.json(built.merged as Record<string, unknown>, 200, {
+  "Cache-Control": "no-store",
+  "X-Content-Type-Options": "nosniff",
+  ...CORS_HEADERS,
+});
+```
+
+Preview responses are never cacheable. This matters because previews reflect mutable draft state rather than immutable published objects.
+
+## Logo Asset Delivery
+
+### `GET /assets/:guid/logo`
+
+The logo route serves a tenant-specific or inherited default logo for an active GUID.
+
+Flow:
+
+1. Resolve the GUID with `getGuid`.
+2. Return bare `404` if the GUID is unknown or not active.
+3. Load tenant branding from `tenant_branding`.
+4. If the tenant explicitly opted out of the instance default, return bare `404`.
+5. If the tenant has no logo, read instance default logo settings directly.
+6. Return bare `404` if no logo key is available.
+7. Fetch the logo object from `STORAGE`.
+8. Return the object with its content type and long-lived public cache headers.
+
+The route accepts a raw `:guid`, not a `.json` filename.
+
+### Tenant Branding
+
+The route reads:
+
+```sql
+SELECT logo_r2_key, logo_content_type, use_default_logo
+FROM tenant_branding
+WHERE tenant_id = ?
+```
+
+The returned values determine which logo to serve:
+
+- `logo_r2_key` present: serve the tenant logo.
+- `logo_r2_key` absent and `use_default_logo === 1`: return `404`.
+- `logo_r2_key` absent and not opted out: try the instance default.
+
+The `use_default_logo === 1` case intentionally serves nothing:
+
+```ts
+if (logoKey === null && branding?.use_default_logo === 1) return bare404();
+```
+
+That lets the Check extension fall back to its built-in logo.
+
+### Instance Default Logo
+
+When a tenant has no logo and has not opted out, the route reads the instance default directly from `instance_settings`:
+
+```ts
+SELECT key, value FROM instance_settings
+WHERE key IN ('default_logo_r2_key', 'default_logo_content_type')
+```
+
+The route deliberately does not call `getInstanceSettings`, because that helper seeds missing defaults. This public unauthenticated route must not write to the database as a side effect.
+
+### Logo Response
+
+Logo objects are streamed from `c.env.STORAGE` and returned with:
+
+- `Content-Type` from branding/default settings, or `application/octet-stream`
+- `Cache-Control: public, max-age=86400`
+- `X-Content-Type-Options: nosniff`
+- shared CORS headers
+
+## Dependencies
+
+This module connects route handling to the database, publish logic, and object storage.
+
+From `src/lib/db.ts`:
+
+- `getGuid` resolves public GUIDs to tenant records and status.
+- `getCurrentVersion` finds the current published ruleset version for a tenant.
+- `getDraftDelta` loads draft changes for preview builds.
+- `countFetchHit` records published ruleset fetches and conditional hits.
+- `countRevokedHit` records access attempts against revoked or inactive GUIDs.
+
+From `src/lib/publish.ts`:
+
+- `formatEtagHeader` formats stored ETag hashes for HTTP headers.
+- `buildMergedRuleset` builds a preview ruleset by merging draft state into the ruleset structure.
+
+From `Env`:
+
+- `c.env.DB` is used for D1-style prepared SQL and helper-backed database access.
+- `c.env.STORAGE` is used to read published rulesets and logo assets by storage key.
+
+## Caching Behavior
+
+Published rulesets and logos have different cache lifetimes:
+
+| Route | Cache-Control | Reason |
+|---|---:|---|
+| `/rules/:guid.json` | `public, max-age=300` | Published rulesets can be cached briefly and revalidated with ETags. |
+| `/preview/:token.json` | `no-store` | Preview output reflects mutable draft state. |
+| `/assets/:guid/logo` | `public, max-age=86400` | Logo assets are relatively stable and safe to cache longer. |
+
+The published ruleset route also supports ETag-based `304` responses. Preview and logo routes do not implement conditional request handling in this module.
+
+## Security Notes
+
+The public delivery model depends on identifier secrecy and response uniformity.
+
+Key patterns to preserve when modifying this module:
+
+- Keep `/rules` and `/assets` unauthenticated unless the delivery model changes globally.
+- Preserve bare `404` responses for identifier misses and inactive resources.
+- Avoid adding response bodies that distinguish unknown, revoked, inactive, unpublished, or missing-storage cases.
+- Do not introduce writes into `/assets/:guid/logo`; the route explicitly avoids settings helpers that seed defaults.
+- Keep `X-Content-Type-Options: nosniff` on JSON and asset responses.
+- Keep preview responses uncached.
 
 ## Contributor Notes
 
-Keep the public-delivery invariants intact when modifying this module:
+When changing published ruleset delivery, check both `GET` and `HEAD` behavior. The current implementation counts both request types and handles conditional requests before deciding whether to stream the object body.
 
-- Public routes should remain unauthenticated, but identifiers must stay unguessable.
-- Misses should continue using `bare404()` unless there is a deliberate product/security decision to expose more detail.
-- Do not add differentiated bodies or status codes for unknown versus revoked GUIDs.
-- Preserve `countRevokedHit()` for non-active GUID probes.
-- Preserve `countFetchHit()` for both `304` and `200` ruleset requests.
-- Avoid reading from R2 on `HEAD` requests.
-- Keep published rules cacheable and preview rules non-cacheable.
-- Route additions should use the same CORS and `X-Content-Type-Options: nosniff` posture unless the asset type requires a different policy.
+When changing ETag behavior, keep `rulesHeaders` and the explicit `formatEtagHeader(version.etag)` comparison aligned. The route compares normalized `If-None-Match` values against the same formatted ETag string that is sent in the response.
+
+When changing logo fallback behavior, preserve the distinction between tenant logo, explicit default opt-out, inherited instance default, and built-in extension fallback. The `use_default_logo === 1` branch currently means "serve no public logo from this endpoint," not "serve the instance default."
