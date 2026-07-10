@@ -123,6 +123,19 @@ Current work queue, in order. Update as items land.
       no-default-logo state explicitly and relabels removal as using
       Check's default logo. End-to-end and artifact-builder tests.
 
+- [x] v0.6.4 release: inherited baseline rules now visible on each
+      tenant's Rules tab (collapsed read-only "inherited" panel above the
+      editor, counts in the summary, full patterns inside; baseline rides
+      the tenant detail response), the Check-default branding opt-out
+      broadened to logo and primary color (pinned to #F77F00 at artifact
+      resolution, stored color kept), Export-CheckGpoConfig.ps1
+      downloadable from the onboarding wizard (bundled into the Worker as
+      a text module, served behind the operator gate), the opt-out button
+      offered on the Branding tab regardless of instance-default state,
+      and the generated GPO script retrying registry writes while a new
+      GPO's SYSVOL permissions settle (field failure on a real DC).
+      Refreshed rules and branding screenshots, wiki, GitNexus index.
+
 Queue complete.
 
 The numbered sections below are scoped and ready to start, in priority
