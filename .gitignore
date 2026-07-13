@@ -9,3 +9,6 @@ dist/
 
 # Machine-local Claude Code permission grants (skills and docs are committed)
 .claude/settings.local.json
+
+# Local Nimbalyst working files
+nimbalyst-local/
