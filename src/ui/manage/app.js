@@ -454,7 +454,7 @@ function domainToPattern(input, includeSubdomains) {
   }
   host = host.replace(/^\*\./, "").replace(/[/?#].*$/, "").replace(/\.+$/, "");
   if (!/^[a-z0-9][a-z0-9.-]*\.[a-z][a-z0-9-]*$/.test(host)) return null;
-  const escaped = host.replace(/\./g, "\\.");
+  const escaped = host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return includeSubdomains
     ? `^https://([^/]*\\.)?${escaped}(/.*)?$`
     : `^https://${escaped}(/.*)?$`;
