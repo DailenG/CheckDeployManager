@@ -14,7 +14,7 @@
     "docs:wiki": "node scripts/sync-wiki.mjs"
   },
   "dependencies": {
-    "hono": "^4.12.29"
+    "hono": "^4.12.32"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.18.4",
