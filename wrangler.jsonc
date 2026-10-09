@@ -3,6 +3,9 @@
   "name": "checkdeploymanager",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-01",
+  // Workers Paid removes the Free plan's hard 10 ms cap; this bounds a runaway.
+  // Measured 2026-09-09..10-09: max 22.1 ms CPU per invocation (cron included).
+  "limits": { "cpu_ms": 1000 },
   "assets": {
     "directory": "src/ui",
     "binding": "ASSETS",
